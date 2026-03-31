@@ -1,4 +1,3 @@
-[#] Netlify config (repo root)
 # App lives in ./writing-app
 
 [build]
