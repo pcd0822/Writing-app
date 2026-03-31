@@ -1,0 +1,11 @@
+[#] Netlify config (repo root)
+# App lives in ./writing-app
+
+[build]
+  base = "writing-app"
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+

@@ -1,0 +1,158 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.label > span {
+  font-weight: 650;
+}
+
+.input {
+  width: 180px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  outline: none;
+  padding: 12px;
+  font-size: 14px;
+}
+
+.input:focus {
+  border-color: rgba(124, 58, 237, 0.55);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.16);
+}
+
+.quick {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quickBtn {
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.quickBtn:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.box {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.22);
+  padding: 12px;
+}
+
+.boxTitle {
+  font-size: 13px;
+  font-weight: 750;
+  opacity: 0.9;
+  margin-bottom: 10px;
+}
+
+.urlRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.url {
+  flex: 1;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  outline: none;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.smallBtn {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.smallBtn:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.meta {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.78;
+  line-height: 1.4;
+}
+
+.revoke {
+  margin-top: 10px;
+  width: 100%;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.revoke:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.revoke:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.empty {
+  font-size: 13px;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+.error {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
