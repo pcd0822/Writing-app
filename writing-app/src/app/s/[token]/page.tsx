@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import styles from "./share.module.css";
 import { Button } from "@/components/ui/Button";
 import { findShare, isShareActive, loadTeacherDb, saveTeacherDb } from "@/lib/localDb";
+import type { TeacherDb } from "@/lib/types";
 import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 
 export default function ShareLandingPage() {
@@ -51,7 +52,7 @@ export default function ShareLandingPage() {
         const remote = await pullDbFromSheet(sid);
         if (remote) {
           // local storage에 덮어써서 이후 흐름이 동일하게 동작하도록
-          saveTeacherDb(remote as any);
+          saveTeacherDb(remote as TeacherDb);
         }
       }
 

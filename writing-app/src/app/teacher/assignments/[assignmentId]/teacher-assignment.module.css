@@ -292,8 +292,218 @@
   line-height: 1.5;
 }
 
+.classGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.classGroupTitle {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  padding-left: 2px;
+}
+
+.dashTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.dashTab {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.2);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dashTabOn {
+  border-color: rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.18);
+}
+
+.feedbackDropZone {
+  margin-top: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.dropHint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin-bottom: 10px;
+}
+
+.quoteBox {
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.1);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.quoteBoxLabel {
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.75;
+  margin-bottom: 6px;
+  color: rgba(125, 211, 252, 0.95);
+}
+
+.quoteBoxText {
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.finalPanel {
+  margin-top: 8px;
+}
+
+.infographic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.infoCard {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 12px;
+}
+
+.infoLabel {
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 10px;
+  opacity: 0.88;
+}
+
+.barList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: minmax(0, 72px) 1fr 28px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.barTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(124, 58, 237, 0.5), rgba(34, 197, 94, 0.45));
+}
+
+.barNum {
+  text-align: right;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.levelPie {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.partialRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 12px;
+  align-items: flex-end;
+}
+
+.partialRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0.85;
+}
+
+.totalLine {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.narrativeBox {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.narrativeText {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  opacity: 0.88;
+}
+
+.publishedBadge {
+  font-size: 12px;
+  color: rgba(34, 197, 94, 0.85);
+  margin: 8px 0;
+}
+
+.finalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.publishBtn {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.18);
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.publishBtn:active {
+  transform: translateY(1px);
+}
+
 @media (max-width: 980px) {
   .grid {
+    grid-template-columns: 1fr;
+  }
+  .infographic {
     grid-template-columns: 1fr;
   }
 }

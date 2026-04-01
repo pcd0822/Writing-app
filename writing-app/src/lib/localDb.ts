@@ -17,7 +17,7 @@ import { getActiveSpreadsheetId, pushDbToSheet } from "./spreadsheetSync";
 const KEY = "writing-app:teacherDb:v1";
 
 const defaultDb: TeacherDb = {
-  version: 3,
+  version: 4,
   classes: [],
   assignments: [],
   allocations: [],
@@ -34,14 +34,48 @@ function assertBrowser() {
   }
 }
 
+function migrateV3RawToV4(parsed: Record<string, unknown>): TeacherDb {
+  const submissions = ((parsed.submissions as Submission[]) || []).map((s) => ({
+    ...s,
+    finalReportPublishedAt: (s as Submission).finalReportPublishedAt ?? null,
+    finalReportSnapshot: (s as Submission).finalReportSnapshot ?? "",
+  }));
+  const scores = ((parsed.scores as Score[]) || []).map((sc) => ({
+    ...sc,
+    outlineScore: (sc as Score).outlineScore ?? null,
+    draftScore: (sc as Score).draftScore ?? null,
+    reviseScore: (sc as Score).reviseScore ?? null,
+  }));
+  return {
+    version: 4,
+    classes: (parsed.classes as TeacherDb["classes"]) || [],
+    assignments: (parsed.assignments as TeacherDb["assignments"]) || [],
+    allocations: (parsed.allocations as TeacherDb["allocations"]) || [],
+    shares: (parsed.shares as TeacherDb["shares"]) || [],
+    submissions,
+    feedbackNotes: (parsed.feedbackNotes as TeacherDb["feedbackNotes"]) || [],
+    aiLogs: (parsed.aiLogs as TeacherDb["aiLogs"]) || [],
+    scores,
+  };
+}
+
 export function loadTeacherDb(): TeacherDb {
   assertBrowser();
   const raw = window.localStorage.getItem(KEY);
   if (!raw) return defaultDb;
   try {
-    const parsed = JSON.parse(raw);
-    const v3 = TeacherDbSchema.safeParse(parsed);
-    if (v3.success) return v3.data;
+    const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+    if (!parsed) return defaultDb;
+
+    if (parsed.version === 3) {
+      const migrated = migrateV3RawToV4(parsed);
+      saveTeacherDb(migrated);
+      const v4 = TeacherDbSchema.safeParse(migrated);
+      return v4.success ? v4.data : defaultDb;
+    }
+
+    const v4 = TeacherDbSchema.safeParse(parsed);
+    if (v4.success) return v4.data;
 
     // v1 -> v2 마이그레이션 (classes만 있던 버전)
     if (parsed && parsed.version === 1 && Array.isArray(parsed.classes)) {
@@ -52,10 +86,9 @@ export function loadTeacherDb(): TeacherDb {
         allocations: [],
         shares: [],
       };
-      // v2 -> v3로 이어서 마이그레이션
       const migrated: TeacherDb = {
         ...v2,
-        version: 3,
+        version: 4,
         submissions: [],
         feedbackNotes: [],
         aiLogs: [],
@@ -65,14 +98,14 @@ export function loadTeacherDb(): TeacherDb {
       return migrated;
     }
 
-    // v2 -> v3 마이그레이션
+    // v2 -> v4 마이그레이션
     if (parsed && parsed.version === 2) {
       const migrated: TeacherDb = {
-        version: 3,
-        classes: parsed.classes || [],
-        assignments: parsed.assignments || [],
-        allocations: parsed.allocations || [],
-        shares: parsed.shares || [],
+        version: 4,
+        classes: (parsed.classes as ClassRoom[]) || [],
+        assignments: (parsed.assignments as TeacherDb["assignments"]) || [],
+        allocations: (parsed.allocations as TeacherDb["allocations"]) || [],
+        shares: (parsed.shares as TeacherDb["shares"]) || [],
         submissions: [],
         feedbackNotes: [],
         aiLogs: [],
@@ -230,6 +263,8 @@ export function getOrCreateSubmission(params: {
     draftApprovedAt: null,
     reviseApprovedAt: null,
     finalApprovedAt: null,
+    finalReportPublishedAt: null,
+    finalReportSnapshot: "",
   };
   const next = { ...db, submissions: [submission, ...db.submissions] };
   saveTeacherDb(next);
@@ -286,6 +321,20 @@ export function upsertScore(score: Score) {
   const db = loadTeacherDb();
   const rest = db.scores.filter((s) => s.submissionId !== score.submissionId);
   saveTeacherDb({ ...db, scores: [score, ...rest] });
+}
+
+export function updateAssignmentById(
+  assignmentId: string,
+  patch: Partial<Pick<Assignment, "title" | "prompt" | "task" | "attachments">>,
+): void {
+  const db = loadTeacherDb();
+  const idx = db.assignments.findIndex((a) => a.id === assignmentId);
+  if (idx < 0) throw new Error("assignment not found");
+  const prev = db.assignments[idx]!;
+  const nextA = { ...prev, ...patch };
+  const assignments = [...db.assignments];
+  assignments[idx] = nextA;
+  saveTeacherDb({ ...db, assignments });
 }
 
 export function getCurrentStage(submission: Submission): Stage {

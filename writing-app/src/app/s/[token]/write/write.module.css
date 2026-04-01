@@ -108,6 +108,77 @@
   cursor: not-allowed;
 }
 
+.feedbackPanelTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.feedbackTabBtn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.feedbackTabBtnOn {
+  border-color: rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.2);
+}
+
+.feedbackPanelBody {
+  margin-top: 8px;
+  padding: 10px 10px 12px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.15);
+  max-height: 280px;
+  overflow: auto;
+}
+
+.feedbackReadonly {
+  font-size: 13px;
+}
+
+.hlGroup {
+  display: inline;
+  white-space: pre-wrap;
+}
+
+.feedbackMark {
+  background: rgba(250, 204, 21, 0.22);
+  border-radius: 6px;
+  padding: 0 2px;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+}
+
+.feedbackIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(124, 58, 237, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  vertical-align: middle;
+  transform: translateY(-1px);
+}
+
+.feedbackIconBtn:active {
+  transform: translateY(0) scale(0.96);
+}
+
 .grid {
   display: contents;
 }

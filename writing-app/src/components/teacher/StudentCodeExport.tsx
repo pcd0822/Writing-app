@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Student } from "@/lib/types";
 import {
   buildClipboardText,
+  captureStudentListToCanvas,
   downloadCsv,
   safeFileBase,
-  sortStudents,
 } from "@/lib/exportStudentCodes";
 import styles from "./StudentCodeExport.module.css";
 
@@ -121,10 +121,6 @@ export function StudentCodeExport({ roomName, students }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const printRef = useRef<HTMLDivElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  const sorted = sortStudents(students);
   const base = safeFileBase(roomName);
 
   useEffect(() => {
@@ -135,18 +131,6 @@ export function StudentCodeExport({ roomName, students }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-
-  const capturePrintEl = useCallback(async () => {
-    const el = printRef.current;
-    if (!el) throw new Error("내보내기 영역을 찾을 수 없습니다.");
-    const html2canvas = (await import("html2canvas")).default;
-    return html2canvas(el, {
-      scale: 2,
-      backgroundColor: "#ffffff",
-      useCORS: true,
-      logging: false,
-    });
-  }, []);
 
   const onCsv = useCallback(async () => {
     setError(null);
@@ -165,7 +149,7 @@ export function StudentCodeExport({ roomName, students }: Props) {
     setError(null);
     setBusy(true);
     try {
-      const canvas = await capturePrintEl();
+      const canvas = await captureStudentListToCanvas(roomName, students);
       await canvasToPdfDownload(canvas, `${base}_학생코드.pdf`);
       setOpen(false);
     } catch {
@@ -173,13 +157,13 @@ export function StudentCodeExport({ roomName, students }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [base, capturePrintEl]);
+  }, [base, roomName, students]);
 
   const onPng = useCallback(async () => {
     setError(null);
     setBusy(true);
     try {
-      const canvas = await capturePrintEl();
+      const canvas = await captureStudentListToCanvas(roomName, students);
       const url = canvas.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = url;
@@ -194,7 +178,7 @@ export function StudentCodeExport({ roomName, students }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [base, capturePrintEl]);
+  }, [base, roomName, students]);
 
   const onClipboard = useCallback(async () => {
     setError(null);
@@ -213,7 +197,7 @@ export function StudentCodeExport({ roomName, students }: Props) {
   if (students.length === 0) return null;
 
   return (
-    <div className={styles.wrap} ref={wrapRef}>
+    <div className={styles.wrap}>
       <button
         type="button"
         className={styles.trigger}
@@ -308,27 +292,6 @@ export function StudentCodeExport({ roomName, students }: Props) {
           </div>
         </>
       ) : null}
-
-      <div ref={printRef} className={styles.printRoot} aria-hidden>
-        <h2 className={styles.printTitle}>{roomName}</h2>
-        <p className={styles.printSub}>학번 · 학생 코드 ({sorted.length}명)</p>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>학번</th>
-              <th>코드</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((s) => (
-              <tr key={s.studentNo}>
-                <td>{s.studentNo}</td>
-                <td>{s.studentCode}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

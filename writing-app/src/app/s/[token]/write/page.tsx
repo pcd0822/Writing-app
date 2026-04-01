@@ -17,8 +17,11 @@ import {
   updateSubmission,
   saveTeacherDb,
 } from "@/lib/localDb";
-import type { Stage } from "@/lib/types";
+import type { Stage, TeacherDb } from "@/lib/types";
+import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/finalReport";
 import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+
+type FeedbackPanelTab = "outline" | "draft" | "revise" | "final";
 
 const TUTOR_W_KEY = "writing-app:tutorWidthPx";
 const TUTOR_H_KEY = "writing-app:tutorHeightPx";
@@ -73,6 +76,8 @@ export default function WritePage() {
     revise: false,
   });
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
+  const [feedbackPanelTab, setFeedbackPanelTab] = useState<FeedbackPanelTab>("outline");
+  const [feedbackNoteModalId, setFeedbackNoteModalId] = useState<string | null>(null);
   const [tutorWidth, setTutorWidth] = useState(320);
   const [tutorHeight, setTutorHeight] = useState(520);
 
@@ -143,11 +148,58 @@ export default function WritePage() {
     setActiveSpreadsheetId(sid);
     void pullDbFromSheet(sid)
       .then((remote) => {
-        if (remote) saveTeacherDb(remote as any);
+        if (remote) saveTeacherDb(remote as TeacherDb);
         setDbBump((v) => v + 1);
       })
       .catch(() => {});
   }, [sid]);
+
+  const onResizeWidthStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = tutorWidth;
+      const onMove = (ev: MouseEvent) => {
+        const delta = startX - ev.clientX;
+        setTutorWidth(Math.min(560, Math.max(240, startW + delta)));
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      document.body.style.cursor = "ew-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [tutorWidth],
+  );
+
+  const onResizeHeightStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = tutorHeight;
+      const onMove = (ev: MouseEvent) => {
+        const maxH = typeof window !== "undefined" ? window.innerHeight - 32 : 900;
+        const delta = ev.clientY - startY;
+        setTutorHeight(Math.min(maxH, Math.max(280, startH + delta)));
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [tutorHeight],
+  );
 
   const canOpenDraft = state.ok && !!state.submission.outlineApprovedAt;
   const canOpenRevise = state.ok && !!state.submission.draftApprovedAt;
@@ -222,7 +274,7 @@ export default function WritePage() {
     return reviseText;
   }
 
-  function renderHighlights(text: string, noteStage: Stage) {
+  function renderFeedbackInText(text: string, noteStage: Stage) {
     if (!state.ok) return text;
     const notes = state.notes
       .filter((n) => n.stage === noteStage && !n.resolvedAt)
@@ -237,19 +289,24 @@ export default function WritePage() {
       const end = Math.max(start, Math.min(text.length, n.end));
       if (start > cursor) nodes.push(<span key={`t-${cursor}`}>{text.slice(cursor, start)}</span>);
       nodes.push(
-        <mark
-          key={`m-${n.id}`}
-          id={`note-${n.id}`}
-          style={{
-            background: "rgba(250, 204, 21, 0.22)",
-            borderRadius: 6,
-            padding: "0 2px",
-            border: "1px solid rgba(250, 204, 21, 0.25)",
-          }}
-          title={n.teacherText}
-        >
-          {text.slice(start, end)}
-        </mark>,
+        <span key={`m-${n.id}`} className={styles.hlGroup}>
+          <mark
+            id={`note-${n.id}`}
+            className={styles.feedbackMark}
+            title="피드백이 연결된 구간"
+          >
+            {text.slice(start, end)}
+          </mark>
+          <button
+            type="button"
+            className={styles.feedbackIconBtn}
+            aria-label="피드백 보기"
+            title="피드백 보기"
+            onClick={() => setFeedbackNoteModalId(n.id)}
+          >
+            💬
+          </button>
+        </span>,
       );
       cursor = end;
     }
@@ -372,53 +429,6 @@ export default function WritePage() {
     }
   }
 
-  const onResizeWidthStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = tutorWidth;
-      const onMove = (ev: MouseEvent) => {
-        const delta = startX - ev.clientX;
-        setTutorWidth(Math.min(560, Math.max(240, startW + delta)));
-      };
-      const onUp = () => {
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    },
-    [tutorWidth],
-  );
-
-  const onResizeHeightStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const startH = tutorHeight;
-      const onMove = (ev: MouseEvent) => {
-        const maxH = typeof window !== "undefined" ? window.innerHeight - 32 : 900;
-        const delta = ev.clientY - startY;
-        setTutorHeight(Math.min(maxH, Math.max(280, startH + delta)));
-      };
-      const onUp = () => {
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      document.body.style.cursor = "ns-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    },
-    [tutorHeight],
-  );
-
   function onResolveNote(noteId: string) {
     resolveFeedbackNote(noteId);
     bumpDb();
@@ -447,6 +457,24 @@ export default function WritePage() {
       >
         <div style={{ fontSize: 14, opacity: 0.85, lineHeight: 1.55 }}>
           교사 검토 후 다음 단계로 진행할 수 있습니다.
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!feedbackNoteModalId}
+        onClose={() => setFeedbackNoteModalId(null)}
+        title="교사 피드백"
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setFeedbackNoteModalId(null)}>
+            닫기
+          </Button>
+        }
+      >
+        <div style={{ fontSize: 14, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
+          {feedbackNoteModalId
+            ? state.notes.find((n) => n.id === feedbackNoteModalId)?.teacherText || ""
+            : ""}
         </div>
       </Modal>
 
@@ -480,6 +508,60 @@ export default function WritePage() {
             >
               {isAssignmentDownload ? "준비 중…" : "과제 다운로드"}
             </button>
+
+            <div className={styles.sectionLabel} style={{ marginTop: 12 }}>
+              교사 피드백 보기
+            </div>
+            <div className={styles.feedbackPanelTabs}>
+              {(["outline", "draft", "revise", "final"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={[
+                    styles.feedbackTabBtn,
+                    feedbackPanelTab === t ? styles.feedbackTabBtnOn : "",
+                  ].join(" ")}
+                  onClick={() => setFeedbackPanelTab(t)}
+                >
+                  {t === "outline"
+                    ? "개요"
+                    : t === "draft"
+                      ? "초고"
+                      : t === "revise"
+                        ? "고쳐쓰기"
+                        : "최종"}
+                </button>
+              ))}
+            </div>
+            <div className={styles.feedbackPanelBody}>
+              {feedbackPanelTab === "final" ? (
+                state.submission.finalReportPublishedAt && state.submission.finalReportSnapshot ? (
+                  <FinalStudentReport snap={parseFinalReportSnapshot(state.submission.finalReportSnapshot || "")} />
+                ) : (
+                  <div className={styles.dim}>교사가 최종 대시보드를 배포하면 여기에 표시됩니다.</div>
+                )
+              ) : (
+                <div className={styles.feedbackReadonly}>
+                  <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
+                    {feedbackPanelTab === "outline"
+                      ? "개요 글 중 피드백 구간"
+                      : feedbackPanelTab === "draft"
+                        ? "초고 글 중 피드백 구간"
+                        : "고쳐쓰기 글 중 피드백 구간"}
+                  </div>
+                  <div className={styles.quote} style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
+                    {renderFeedbackInText(
+                      feedbackPanelTab === "outline"
+                        ? outlineText
+                        : feedbackPanelTab === "draft"
+                          ? draftText
+                          : reviseText,
+                      feedbackPanelTab,
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 
@@ -600,7 +682,7 @@ export default function WritePage() {
                   <div className={styles.noteTitle}>초고 하이라이트</div>
                   <div className={styles.quote}>
                     <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
-                      {renderHighlights(draftText || "", "draft")}
+                      {renderFeedbackInText(draftText || "", "draft")}
                     </div>
                   </div>
                 </div>
@@ -668,6 +750,39 @@ export default function WritePage() {
           ?
         </button>
       ) : null}
+    </div>
+  );
+}
+
+function FinalStudentReport({ snap }: { snap: FinalReportSnapshotV1 | null }) {
+  if (!snap) {
+    return <div style={{ fontSize: 12, opacity: 0.75 }}>표시할 데이터가 없습니다.</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 800 }}>최종 점수: {snap.totalScore}</div>
+      <div style={{ fontSize: 12, opacity: 0.85 }}>
+        부분 점수 — 개요: {snap.partialScores.outline ?? "—"} / 초고: {snap.partialScores.draft ?? "—"} / 고쳐쓰기:{" "}
+        {snap.partialScores.revise ?? "—"}
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{snap.teacherSummary}</div>
+      <div style={{ fontSize: 12, opacity: 0.85, whiteSpace: "pre-wrap" }}>{snap.narrativeSummary}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>질문 키워드</div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+        {snap.questionStats.wordFrequency.slice(0, 8).map((w) => (
+          <li key={w.word}>
+            {w.word} — {w.count}회
+          </li>
+        ))}
+      </ul>
+      <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>교사 메모 요약</div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+        {snap.feedbackMemos.slice(0, 12).map((m) => (
+          <li key={m.id} style={{ marginBottom: 6 }}>
+            <b>[{m.stage}]</b> {m.teacherText}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

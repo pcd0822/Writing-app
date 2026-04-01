@@ -8,6 +8,7 @@ import { callFunction } from "@/lib/netlifyClient";
 import { loadTeacherSettings, saveTeacherSettings } from "@/lib/teacherSettings";
 import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 import { saveTeacherDb } from "@/lib/localDb";
+import type { TeacherDb } from "@/lib/types";
 
 type Props = {
   isOpen: boolean;
@@ -35,7 +36,7 @@ export function SpreadsheetSetupModal({ isOpen, onClose, onSaved }: Props) {
       setActiveSpreadsheetId(id);
       // 시트에 기존 DB가 있으면 pull해서 로컬을 최신으로 맞춤(기기 이동 대비)
       const remote = await pullDbFromSheet(id);
-      if (remote) saveTeacherDb(remote as any);
+      if (remote) saveTeacherDb(remote as TeacherDb);
       onSaved();
       onClose();
     } catch (e) {

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../providers";
 import { signOutCurrentUser } from "@/lib/auth";
-import { Button } from "@/components/ui/Button";
 import { CreateClassModal } from "@/components/teacher/CreateClassModal";
 import { loadTeacherDb } from "@/lib/localDb";
 import styles from "./teacher.module.css";
@@ -13,6 +12,7 @@ import { loadTeacherSettings } from "@/lib/teacherSettings";
 import { CreateAssignmentModal } from "@/components/teacher/CreateAssignmentModal";
 import { ShareAssignmentModal } from "@/components/teacher/ShareAssignmentModal";
 import { StudentCodeExport } from "@/components/teacher/StudentCodeExport";
+import { EditAssignmentModal } from "@/components/teacher/EditAssignmentModal";
 
 export default function TeacherPage() {
   const { user, isLoading } = useAuth();
@@ -22,6 +22,7 @@ export default function TeacherPage() {
   const [isSheetSetupOpen, setIsSheetSetupOpen] = useState(false);
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [shareAssignmentId, setShareAssignmentId] = useState<string | null>(null);
+  const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [dbVersion, setDbVersion] = useState(0);
 
@@ -169,33 +170,39 @@ export default function TeacherPage() {
               ) : (
                 <div className={styles.classes}>
                   {db.assignments.map((a) => (
-                  <div key={a.id} style={{ display: "contents" }}>
-                    <button
-                      className={styles.classCard}
-                      onClick={() => router.push(`/teacher/assignments/${a.id}`)}
-                      title="과제 대시보드 열기"
-                    >
+                    <div key={a.id} className={styles.assignmentCard}>
                       <div className={styles.className}>{a.title}</div>
                       <div className={styles.classMeta}>
                         <span>배당 {allocationsByAssignmentId.get(a.id) || 0}개</span>
-                        <span>
-                          {new Date(a.createdAt).toLocaleDateString("ko-KR")}
-                        </span>
+                        <span>{new Date(a.createdAt).toLocaleDateString("ko-KR")}</span>
                       </div>
-                    </button>
-                    <button
-                      className={styles.tinyButton}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setShareAssignmentId(a.id);
-                      }}
-                      title="공유 링크 생성/관리"
-                      style={{ marginTop: 8 }}
-                    >
-                      공유
-                    </button>
-                  </div>
+                      <div className={styles.assignmentCardActions}>
+                        <button
+                          type="button"
+                          className={styles.cardMiniBtn}
+                          onClick={() => setShareAssignmentId(a.id)}
+                          title="공유 링크 생성/관리"
+                        >
+                          공유
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.cardMiniBtn}
+                          onClick={() => setEditAssignmentId(a.id)}
+                          title="과제 내용 수정"
+                        >
+                          과제 수정
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.cardMiniBtn}
+                          onClick={() => router.push(`/teacher/assignments/${a.id}`)}
+                          title="과제 대시보드"
+                        >
+                          대시보드 보기
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -254,6 +261,12 @@ export default function TeacherPage() {
         assignmentId={shareAssignmentId}
         onClose={() => setShareAssignmentId(null)}
         onChanged={refreshDb}
+      />
+      <EditAssignmentModal
+        isOpen={!!editAssignmentId}
+        assignmentId={editAssignmentId}
+        onClose={() => setEditAssignmentId(null)}
+        onSaved={refreshDb}
       />
     </div>
   );

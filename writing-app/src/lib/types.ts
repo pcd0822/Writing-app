@@ -81,6 +81,10 @@ export const SubmissionSchema = z.object({
   draftApprovedAt: z.number().int().nullable().default(null),
   reviseApprovedAt: z.number().int().nullable().default(null),
   finalApprovedAt: z.number().int().nullable().default(null),
+  /** 교사가 최종 대시보드를 배포한 시각 */
+  finalReportPublishedAt: z.number().int().nullable().optional().default(null),
+  /** 교사가 저장한 최종 대시보드 스냅샷(JSON 문자열) */
+  finalReportSnapshot: z.string().optional().default(""),
 });
 export type Submission = z.infer<typeof SubmissionSchema>;
 
@@ -112,11 +116,14 @@ export const ScoreSchema = z.object({
   createdAt: z.number().int(),
   teacherSummary: z.string().default(""),
   score: z.number().int().nullable().default(null),
+  outlineScore: z.number().int().nullable().optional().default(null),
+  draftScore: z.number().int().nullable().optional().default(null),
+  reviseScore: z.number().int().nullable().optional().default(null),
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
 export const TeacherDbSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   classes: z.array(ClassSchema),
   assignments: z.array(AssignmentSchema),
   allocations: z.array(AssignmentAllocationSchema),
