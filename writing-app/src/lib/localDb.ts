@@ -331,7 +331,15 @@ export function updateAssignmentById(
   const idx = db.assignments.findIndex((a) => a.id === assignmentId);
   if (idx < 0) throw new Error("assignment not found");
   const prev = db.assignments[idx]!;
-  const nextA = { ...prev, ...patch };
+  /** Partial 병합 시 undefined가 덮어쓰면 JSON 직렬화에서 키가 빠져 첨부 등이 초기화됨 */
+  const nextA: Assignment = {
+    ...prev,
+    title: patch.title !== undefined ? patch.title : prev.title,
+    prompt: patch.prompt !== undefined ? patch.prompt : prev.prompt,
+    task: patch.task !== undefined ? patch.task : prev.task,
+    attachments:
+      patch.attachments !== undefined ? patch.attachments : prev.attachments ?? [],
+  };
   const assignments = [...db.assignments];
   assignments[idx] = nextA;
   saveTeacherDb({ ...db, assignments });

@@ -128,7 +128,8 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
         createdAt: Date.now(),
       };
 
-      const next1 = addAssignment(db, assignment);
+      const dbNow = loadTeacherDb();
+      const next1 = addAssignment(dbNow, assignment);
       const targets = parseTargets(selectedTargets);
       const next2 = setAllocation(next1, { assignmentId, targets });
       saveTeacherDb(next2);

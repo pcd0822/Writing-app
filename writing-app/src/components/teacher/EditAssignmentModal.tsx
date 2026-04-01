@@ -4,12 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import styles from "./CreateAssignmentModal.module.css";
-import {
-  loadTeacherDb,
-  saveTeacherDb,
-  setAllocation,
-  updateAssignmentById,
-} from "@/lib/localDb";
+import { loadTeacherDb, saveTeacherDb, setAllocation } from "@/lib/localDb";
 import type { AssignmentTarget } from "@/lib/types";
 
 type Props = {
@@ -124,10 +119,12 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
           r.onerror = () => resolve(undefined);
           r.readAsDataURL(f);
         });
-      const prev = db.assignments.find((a) => a.id === assignmentId);
-      if (!prev) return setError("과제를 찾을 수 없습니다.");
+      const fresh = loadTeacherDb();
+      const idx = fresh.assignments.findIndex((a) => a.id === assignmentId);
+      if (idx < 0) return setError("과제를 찾을 수 없습니다.");
+      const prev = fresh.assignments[idx]!;
 
-      let attachments = prev.attachments;
+      let attachments = [...(prev.attachments ?? [])];
       if (files.length) {
         const nextAtt = await Promise.all(
           files.map(async (f) => ({
@@ -137,19 +134,22 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
             dataUrl: await readDataUrl(f),
           })),
         );
-        attachments = [...prev.attachments, ...nextAtt];
+        attachments = [...attachments, ...nextAtt];
       }
 
-      updateAssignmentById(assignmentId, {
+      const nextAssignments = [...fresh.assignments];
+      nextAssignments[idx] = {
+        ...prev,
         title: t,
         prompt: p,
         task: k,
         attachments,
-      });
-
-      const nextDb = loadTeacherDb();
+      };
       const targets = parseTargets(selectedTargets);
-      const withAlloc = setAllocation(nextDb, { assignmentId, targets });
+      const withAlloc = setAllocation(
+        { ...fresh, assignments: nextAssignments },
+        { assignmentId, targets },
+      );
       saveTeacherDb(withAlloc);
 
       setFiles([]);
