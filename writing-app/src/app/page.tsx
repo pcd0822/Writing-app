@@ -40,7 +40,7 @@ export default function Home() {
         <div className={styles.grid}>
           <section className={styles.card}>
             <h2>교사</h2>
-            <p>Google 로그인(파이어베이스)로 교사 대시보드에 प्रवेश합니다.</p>
+            <p>Google 로그인으로 교사 대시보드에 로그인합니다.</p>
             <button
               className={styles.primaryButton}
               onClick={onTeacherLogin}
