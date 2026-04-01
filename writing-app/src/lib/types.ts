@@ -18,6 +18,8 @@ export const AttachmentSchema = z.object({
   name: z.string().min(1),
   type: z.string().optional(),
   size: z.number().int().nonnegative().optional(),
+  /** 교사 업로드 시 base64 data URL (학생 화면 미리보기용, 용량 제한 있음) */
+  dataUrl: z.string().optional(),
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 

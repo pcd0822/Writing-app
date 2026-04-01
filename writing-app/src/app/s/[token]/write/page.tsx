@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import styles from "./write.module.css";
 import { Button } from "@/components/ui/Button";
 import { AiTutor } from "@/components/student/AiTutor";
+import { AttachmentDrawer } from "@/components/student/AttachmentDrawer";
 import {
   findShare,
   getCurrentStage,
@@ -35,6 +36,18 @@ export default function WritePage() {
   const [tab, setTab] = useState<Stage>("outline");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [outlineText, setOutlineText] = useState("");
+  const [draftText, setDraftText] = useState("");
+  const [reviseText, setReviseText] = useState("");
+  const saveTimer = useRef<number | null>(null);
+  const [selection, setSelection] = useState<{
+    stage: Stage;
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [aiReference, setAiReference] = useState<string | null>(null);
 
   const state = useMemo(() => {
     if (!token || !studentNo) return { ok: false as const, reason: "missing" };
@@ -77,14 +90,22 @@ export default function WritePage() {
   const canOpenDraft = state.ok && !!state.submission.outlineApprovedAt;
   const canOpenRevise = state.ok && !!state.submission.draftApprovedAt;
 
-  function isSubmittedFor(stage: Stage) {
-    if (!state.ok) return false;
-    const s = state.submission;
-    return stage === "outline"
-      ? !!s.outlineSubmittedAt && !s.outlineApprovedAt
-      : stage === "draft"
-        ? !!s.draftSubmittedAt && !s.draftApprovedAt
-        : !!s.reviseSubmittedAt && !s.reviseApprovedAt;
+  // submission 로드 시 로컬 편집 상태 동기화
+  useEffect(() => {
+    if (!state.ok) return;
+    setOutlineText(state.submission.outlineText || "");
+    setDraftText(state.submission.draftText || "");
+    setReviseText(state.submission.reviseText || "");
+  }, [state.ok, state.ok ? state.submission.id : null]);
+
+  function persist(stage: Stage, text: string) {
+    if (!state.ok) return;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      if (stage === "outline") updateSubmission(state.submission.id, { outlineText: text });
+      else if (stage === "draft") updateSubmission(state.submission.id, { draftText: text });
+      else updateSubmission(state.submission.id, { reviseText: text });
+    }, 120);
   }
 
   function approvalPill(stage: Stage) {
@@ -107,9 +128,9 @@ export default function WritePage() {
 
   function currentText(stage: Stage) {
     if (!state.ok) return "";
-    if (stage === "outline") return state.submission.outlineText || "";
-    if (stage === "draft") return state.submission.draftText || "";
-    return state.submission.reviseText || "";
+    if (stage === "outline") return outlineText;
+    if (stage === "draft") return draftText;
+    return reviseText;
   }
 
   function renderHighlights(text: string, noteStage: Stage) {
@@ -149,9 +170,10 @@ export default function WritePage() {
 
   function setText(stage: Stage, text: string) {
     if (!state.ok) return;
-    if (stage === "outline") updateSubmission(state.submission.id, { outlineText: text });
-    else if (stage === "draft") updateSubmission(state.submission.id, { draftText: text });
-    else updateSubmission(state.submission.id, { reviseText: text });
+    if (stage === "outline") setOutlineText(text);
+    else if (stage === "draft") setDraftText(text);
+    else setReviseText(text);
+    persist(stage, text);
   }
 
   async function onSubmit(stage: Stage) {
@@ -188,16 +210,80 @@ export default function WritePage() {
     (tab === "revise" && !!state.submission.reviseSubmittedAt && !state.submission.reviseApprovedAt);
 
   const contextHint = `${state.assignment.title} / ${stageLabel(tab)} / 학생 ${studentNo}`;
+  const editorDisabled = lockedByApproval;
+  const currentStageForSelection = tab;
+
+  const attachments = state.assignment.attachments || [];
+
+  function onEditorMouseUp(e: React.MouseEvent<HTMLTextAreaElement>) {
+    if (editorDisabled) return;
+    const el = e.currentTarget;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    if (end <= start) {
+      setSelection(null);
+      return;
+    }
+    const text = el.value.slice(start, end).trim();
+    if (!text) {
+      setSelection(null);
+      return;
+    }
+    // 드래그한 “옆” 느낌으로: mouseup 지점 근처에 버튼 표시
+    setSelection({
+      stage: currentStageForSelection,
+      text,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  }
+
+  function sendSelectionToAi() {
+    if (!selection) return;
+    setAiReference(selection.text);
+    // AI로 보낸 뒤 선택 UI는 정리(원하면 유지 가능)
+    setSelection(null);
+  }
 
   return (
     <div className={styles.page}>
-      <div className={styles.grid}>
-        <div className={styles.panel}>
-          <div className={styles.head}>
-            <div className={styles.title}>{state.assignment.title}</div>
-            <div className={styles.sub}>
+      <AttachmentDrawer
+        attachments={attachments}
+        isOpen={attachmentOpen}
+        onClose={() => setAttachmentOpen(false)}
+      />
+      <div className={styles.shell}>
+        <aside className={styles.assignmentPanel}>
+          <div className={styles.assignmentScroll}>
+            <div className={styles.assignmentTitle}>{state.assignment.title}</div>
+            <div className={styles.assignmentMeta}>
               학생 {studentNo} · {state.cls.name}
             </div>
+            <div>
+              <div className={styles.sectionLabel}>제시문</div>
+              <div className={styles.assignmentPrompt}>
+                <ReactMarkdown>{state.assignment.prompt}</ReactMarkdown>
+              </div>
+            </div>
+            <div>
+              <div className={styles.sectionLabel}>과제</div>
+              <div className={styles.assignmentTask}>{state.assignment.task}</div>
+            </div>
+            <button
+              type="button"
+              className={styles.attachBtn}
+              disabled={attachments.length === 0}
+              onClick={() => setAttachmentOpen(true)}
+            >
+              {attachments.length === 0 ? "등록된 첨부 없음" : "첨부파일 보기"}
+            </button>
+          </div>
+        </aside>
+
+        <div className={styles.panel}>
+          <div className={styles.head}>
+            <div className={styles.title}>작문</div>
+            <div className={styles.sub}>단계별로 작성하고 제출하세요.</div>
           </div>
 
           <div className={styles.tabs}>
@@ -247,6 +333,7 @@ export default function WritePage() {
               className={[styles.editor, tab === "outline" ? styles.mono : ""].join(" ")}
               value={currentText(tab)}
               onChange={(e) => setText(tab, e.target.value)}
+              onMouseUp={onEditorMouseUp}
               placeholder={
                 tab === "outline"
                   ? "- 주장\n  - 근거 1\n  - 근거 2\n- 예상 반론과 재반박\n"
@@ -254,6 +341,22 @@ export default function WritePage() {
               }
               disabled={lockedByApproval}
             />
+
+            {selection ? (
+              <div className={styles.selectionBar}>
+                <div className={styles.selectionText}>
+                  선택됨: {selection.text.length > 220 ? `${selection.text.slice(0, 220)}…` : selection.text}
+                </div>
+                <button
+                  type="button"
+                  className={styles.questionBtn}
+                  onClick={sendSelectionToAi}
+                  title="이 구간을 AI 튜터에 참고로 보내기"
+                >
+                  ?
+                </button>
+              </div>
+            ) : null}
 
             {tab === "outline" && currentText("outline").trim() ? (
               <div className={styles.noteBox}>
@@ -273,7 +376,7 @@ export default function WritePage() {
                   <div className={styles.noteTitle}>초고 하이라이트</div>
                   <div className={styles.quote}>
                     <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
-                      {renderHighlights(state.submission.draftText || "", "draft")}
+                      {renderHighlights(draftText || "", "draft")}
                     </div>
                   </div>
                 </div>
@@ -317,8 +420,27 @@ export default function WritePage() {
           </div>
         </div>
 
-        <AiTutor submissionId={state.submission.id} stage={tab} contextHint={contextHint} />
+        <div className={styles.tutorCol}>
+          <AiTutor
+            submissionId={state.submission.id}
+            stage={tab}
+            contextHint={contextHint}
+            referenceText={aiReference}
+          />
+        </div>
       </div>
+
+      {selection ? (
+        <button
+          type="button"
+          className={styles.questionFloat}
+          style={{ left: Math.min(selection.x + 10, window.innerWidth - 50), top: Math.min(selection.y + 10, window.innerHeight - 50) }}
+          onClick={sendSelectionToAi}
+          title="선택 구간을 AI 튜터에 참고로 보내기"
+        >
+          ?
+        </button>
+      ) : null}
     </div>
   );
 }

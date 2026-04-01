@@ -34,7 +34,9 @@ export function ShareAssignmentModal({
   const [minutes, setMinutes] = useState(60);
   const [isCreating, setIsCreating] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localVer, setLocalVer] = useState(0);
 
   const db = useMemo(() => {
     if (!isOpen) return null;
@@ -43,7 +45,7 @@ export function ShareAssignmentModal({
     } catch {
       return null;
     }
-  }, [isOpen]);
+  }, [isOpen, localVer]);
 
   const activeShare = useMemo(() => {
     if (!db || !assignmentId) return null;
@@ -80,6 +82,7 @@ export function ShareAssignmentModal({
         expiresAt: minutesFromNow(m),
       });
       saveTeacherDb(next);
+      setLocalVer((v) => v + 1); // 모달 내 즉시 갱신
       onChanged();
     } catch {
       setError("공유 링크 생성에 실패했습니다.");
@@ -96,6 +99,7 @@ export function ShareAssignmentModal({
       const db0 = loadTeacherDb();
       const next = revokeShareLink(db0, activeShare.token);
       saveTeacherDb(next);
+      setLocalVer((v) => v + 1); // 모달 내 즉시 갱신
       onChanged();
     } catch {
       setError("공유 링크 폐기에 실패했습니다.");
@@ -173,7 +177,7 @@ export function ShareAssignmentModal({
               </div>
               <button
                 className={styles.revoke}
-                onClick={onRevoke}
+                onClick={() => setIsConfirmOpen(true)}
                 disabled={isRevoking}
               >
                 {isRevoking ? "폐기 중…" : "이 링크 폐기하기"}
@@ -188,6 +192,48 @@ export function ShareAssignmentModal({
 
         {error ? <div className={styles.error}>{error}</div> : null}
       </div>
+
+      <Modal
+        isOpen={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        title="이 링크를 폐기하시겠습니까?"
+        description="폐기하면 이 링크로는 더 이상 학생이 작문을 이어갈 수 없습니다. 계속하려면 새 링크를 생성해야 합니다."
+        size="lg"
+        footer={
+          <div className={styles.footer}>
+            <Button
+              variant="secondary"
+              onClick={() => setIsConfirmOpen(false)}
+              disabled={isRevoking}
+            >
+              취소
+            </Button>
+            <Button
+              onClick={async () => {
+                await onRevoke();
+                setIsConfirmOpen(false);
+              }}
+              isLoading={isRevoking}
+              disabled={!activeShare}
+            >
+              폐기하기
+            </Button>
+          </div>
+        }
+      >
+        <div className={styles.body}>
+          <div className={styles.box}>
+            <div className={styles.boxTitle}>폐기 대상 링크</div>
+            {shareUrl ? (
+              <div className={styles.urlRow}>
+                <input className={styles.url} value={shareUrl} readOnly />
+              </div>
+            ) : (
+              <div className={styles.empty}>폐기할 유효 링크가 없습니다.</div>
+            )}
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }

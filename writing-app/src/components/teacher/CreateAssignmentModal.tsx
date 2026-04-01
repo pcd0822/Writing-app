@@ -99,12 +99,32 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
     setIsSaving(true);
     try {
       const assignmentId = createAssignmentId();
+      const MAX_DATA = 1.5 * 1024 * 1024; // 시트/로컬 저장 한도 고려
+      const readDataUrl = (f: File) =>
+        new Promise<string | undefined>((resolve) => {
+          if (f.size > MAX_DATA) {
+            resolve(undefined);
+            return;
+          }
+          const r = new FileReader();
+          r.onload = () => resolve(typeof r.result === "string" ? r.result : undefined);
+          r.onerror = () => resolve(undefined);
+          r.readAsDataURL(f);
+        });
+      const attachments = await Promise.all(
+        files.map(async (f) => ({
+          name: f.name,
+          type: f.type,
+          size: f.size,
+          dataUrl: await readDataUrl(f),
+        })),
+      );
       const assignment = {
         id: assignmentId,
         title: t,
         prompt: p,
         task: k,
-        attachments: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
+        attachments,
         createdAt: Date.now(),
       };
 
@@ -201,8 +221,8 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
               </div>
             ) : (
               <div className={styles.hint}>
-                현재는 파일 “업로드”가 아니라 파일명/용량/타입만 저장합니다. 다음 단계에서
-                Netlify 저장소(Blob)로 업로드까지 연결합니다.
+                파일당 약 1.5MB 이하이면 학생 화면에서 미리보기용으로 함께 저장됩니다. 더 큰 파일은
+                파일명·용량만 저장됩니다.
               </div>
             )}
           </label>

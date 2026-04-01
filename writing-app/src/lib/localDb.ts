@@ -140,7 +140,8 @@ export function setAllocation(
 }
 
 export function createShareToken() {
-  return nanoid(24);
+  // 공유 링크를 간소화: 너무 길지 않게(충돌 가능성은 낮음)
+  return nanoid(12);
 }
 
 export function createShareLink(

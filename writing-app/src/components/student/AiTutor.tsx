@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./AiTutor.module.css";
 import { Button } from "@/components/ui/Button";
 import { callFunction } from "@/lib/netlifyClient";
@@ -28,15 +28,18 @@ export function AiTutor({
   submissionId,
   stage,
   contextHint,
+  referenceText,
 }: {
   submissionId: string;
   stage: Stage;
   contextHint: string;
+  referenceText?: string | null;
 }) {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const header = useMemo(() => {
     return stage === "outline"
@@ -45,6 +48,16 @@ export function AiTutor({
         ? "AI 작문 튜터(초고)"
         : "AI 작문 튜터(고쳐쓰기)";
   }, [stage]);
+
+  useEffect(() => {
+    const ref = (referenceText || "").trim();
+    if (!ref) return;
+    const clipped = ref.length > 600 ? `${ref.slice(0, 600)}…` : ref;
+    const next = `다음 구간을 참고해서 질문할게요.\n\n[선택한 구간]\n${clipped}\n\n[질문] `;
+    setInput((prev) => (prev.trim() ? `${next}${prev}` : next));
+    // 다음 입력을 쉽게 하도록 포커스
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [referenceText]);
 
   async function onSend() {
     setError(null);
@@ -135,6 +148,7 @@ export function AiTutor({
       <div className={styles.inputRow}>
         <textarea
           className={styles.input}
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="질문을 입력하세요. 예) ‘이 문단의 근거가 충분한가요?’"
