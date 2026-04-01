@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import styles from "./write.module.css";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { AiTutor } from "@/components/student/AiTutor";
-import { AttachmentDrawer } from "@/components/student/AttachmentDrawer";
+import { downloadAssignmentZip } from "@/lib/downloadAssignmentPackage";
 import {
   findShare,
-  getCurrentStage,
   getOrCreateSubmission,
   isShareActive,
   loadTeacherDb,
@@ -20,11 +20,28 @@ import {
 import type { Stage } from "@/lib/types";
 import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 
+const TUTOR_W_KEY = "writing-app:tutorWidthPx";
+const TUTOR_H_KEY = "writing-app:tutorHeightPx";
+
 function stageLabel(stage: Stage) {
   if (stage === "outline") return "1단계: 개요쓰기";
   if (stage === "draft") return "2단계: 초고쓰기";
   return "3단계: 고쳐쓰기";
 }
+
+function stageSubmitted(s: { outlineSubmittedAt: number | null; draftSubmittedAt: number | null; reviseSubmittedAt: number | null }, stage: Stage) {
+  if (stage === "outline") return s.outlineSubmittedAt != null;
+  if (stage === "draft") return s.draftSubmittedAt != null;
+  return s.reviseSubmittedAt != null;
+}
+
+function stageApproved(s: { outlineApprovedAt: number | null; draftApprovedAt: number | null; reviseApprovedAt: number | null }, stage: Stage) {
+  if (stage === "outline") return s.outlineApprovedAt != null;
+  if (stage === "draft") return s.draftApprovedAt != null;
+  return s.reviseApprovedAt != null;
+}
+
+type EditUnlock = Record<Stage, boolean>;
 
 export default function WritePage() {
   const params = useParams<{ token: string }>();
@@ -35,8 +52,9 @@ export default function WritePage() {
 
   const [tab, setTab] = useState<Stage>("outline");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [isAssignmentDownload, setIsAssignmentDownload] = useState(false);
   const [outlineText, setOutlineText] = useState("");
   const [draftText, setDraftText] = useState("");
   const [reviseText, setReviseText] = useState("");
@@ -48,6 +66,15 @@ export default function WritePage() {
     y: number;
   } | null>(null);
   const [aiReference, setAiReference] = useState<string | null>(null);
+  const [dbBump, setDbBump] = useState(0);
+  const [stageEditUnlocked, setStageEditUnlocked] = useState<EditUnlock>({
+    outline: false,
+    draft: false,
+    revise: false,
+  });
+  const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
+  const [tutorWidth, setTutorWidth] = useState(320);
+  const [tutorHeight, setTutorHeight] = useState(520);
 
   const state = useMemo(() => {
     if (!token || !studentNo) return { ok: false as const, reason: "missing" };
@@ -68,21 +95,56 @@ export default function WritePage() {
       const notes = db.feedbackNotes
         .filter((n) => n.submissionId === submission.id && !n.resolvedAt)
         .sort((a, b) => a.createdAt - b.createdAt);
-      const currentStage = getCurrentStage(submission);
       const score = db.scores.find((s) => s.submissionId === submission.id) || null;
-      return { ok: true as const, db, share, assignment, cls, submission, notes, currentStage, score };
+      return { ok: true as const, db, share, assignment, cls, submission, notes, score };
     } catch {
       return { ok: false as const, reason: "error" };
     }
-  }, [token, studentNo]);
+  }, [token, studentNo, dbBump]);
 
-  // sid가 있으면 최신 DB pull (최초 렌더 시만). saveTeacherDb가 push를 담당.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const w = localStorage.getItem(TUTOR_W_KEY);
+      const h = localStorage.getItem(TUTOR_H_KEY);
+      if (w) {
+        const n = parseInt(w, 10);
+        if (Number.isFinite(n)) setTutorWidth(Math.min(560, Math.max(240, n)));
+      }
+      if (h) {
+        const n = parseInt(h, 10);
+        if (Number.isFinite(n)) setTutorHeight(Math.min(window.innerHeight - 32, Math.max(280, n)));
+      } else {
+        setTutorHeight(Math.min(560, window.innerHeight - 32));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TUTOR_W_KEY, String(tutorWidth));
+    } catch {
+      /* ignore */
+    }
+  }, [tutorWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TUTOR_H_KEY, String(tutorHeight));
+    } catch {
+      /* ignore */
+    }
+  }, [tutorHeight]);
+
   useEffect(() => {
     if (!sid) return;
     setActiveSpreadsheetId(sid);
     void pullDbFromSheet(sid)
       .then((remote) => {
         if (remote) saveTeacherDb(remote as any);
+        setDbBump((v) => v + 1);
       })
       .catch(() => {});
   }, [sid]);
@@ -90,13 +152,21 @@ export default function WritePage() {
   const canOpenDraft = state.ok && !!state.submission.outlineApprovedAt;
   const canOpenRevise = state.ok && !!state.submission.draftApprovedAt;
 
-  // submission 로드 시 로컬 편집 상태 동기화
   useEffect(() => {
     if (!state.ok) return;
     setOutlineText(state.submission.outlineText || "");
     setDraftText(state.submission.draftText || "");
     setReviseText(state.submission.reviseText || "");
   }, [state.ok, state.ok ? state.submission.id : null]);
+
+  useEffect(() => {
+    if (!state.ok) return;
+    setStageEditUnlocked({ outline: false, draft: false, revise: false });
+  }, [state.ok, state.ok ? state.submission.id : null]);
+
+  function bumpDb() {
+    setDbBump((v) => v + 1);
+  }
 
   function persist(stage: Stage, text: string) {
     if (!state.ok) return;
@@ -105,25 +175,44 @@ export default function WritePage() {
       if (stage === "outline") updateSubmission(state.submission.id, { outlineText: text });
       else if (stage === "draft") updateSubmission(state.submission.id, { draftText: text });
       else updateSubmission(state.submission.id, { reviseText: text });
+      bumpDb();
     }, 120);
   }
 
-  function approvalPill(stage: Stage) {
-    if (!state.ok) return "";
+  function flushSaveToDb() {
+    if (!state.ok) return;
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    updateSubmission(state.submission.id, {
+      outlineText,
+      draftText,
+      reviseText,
+    });
+    bumpDb();
+  }
+
+  async function onSaveClick() {
+    if (!state.ok) return;
+    setError(null);
+    setIsSaving(true);
+    try {
+      flushSaveToDb();
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function stageStatusPill(stage: Stage) {
+    if (!state.ok) return { label: "", className: styles.statusPillWriting };
     const s = state.submission;
-    if (stage === "outline") {
-      if (s.outlineApprovedAt) return "승인 완료";
-      if (s.outlineSubmittedAt) return "승인 대기중";
-      return "작성 중";
-    }
-    if (stage === "draft") {
-      if (s.draftApprovedAt) return "승인 완료";
-      if (s.draftSubmittedAt) return "승인 대기중";
-      return "작성 중";
-    }
-    if (s.reviseApprovedAt) return "승인 완료";
-    if (s.reviseSubmittedAt) return "승인 대기중";
-    return "작성 중";
+    const sub = stageSubmitted(s, stage);
+    const ap = stageApproved(s, stage);
+    if (ap) return { label: "작성완료", className: styles.statusPillDone };
+    if (sub && stageEditUnlocked[stage]) return { label: "수정중", className: styles.statusPillEditing };
+    if (sub) return { label: "작성완료", className: styles.statusPillDone };
+    return { label: "작성중", className: styles.statusPillWriting };
   }
 
   function currentText(stage: Stage) {
@@ -141,7 +230,7 @@ export default function WritePage() {
       .sort((a, b) => a.start - b.start);
     if (notes.length === 0) return text;
 
-    const nodes: any[] = [];
+    const nodes: ReactNode[] = [];
     let cursor = 0;
     for (const n of notes) {
       const start = Math.max(0, Math.min(text.length, n.start));
@@ -164,7 +253,7 @@ export default function WritePage() {
       );
       cursor = end;
     }
-    if (cursor < text.length) nodes.push(<span key={`t-end`}>{text.slice(cursor)}</span>);
+    if (cursor < text.length) nodes.push(<span key="t-end">{text.slice(cursor)}</span>);
     return nodes;
   }
 
@@ -176,7 +265,16 @@ export default function WritePage() {
     persist(stage, text);
   }
 
-  async function onSubmit(stage: Stage) {
+  function editorLocked(stage: Stage) {
+    if (!state.ok) return true;
+    const s = state.submission;
+    if (stageApproved(s, stage)) return true;
+    const sub = stageSubmitted(s, stage);
+    if (!sub) return false;
+    return !stageEditUnlocked[stage];
+  }
+
+  async function onSubmitStage(stage: Stage) {
     setError(null);
     if (!state.ok) return;
     const text = currentText(stage).trim();
@@ -184,14 +282,39 @@ export default function WritePage() {
       setError("내용을 작성한 뒤 제출해주세요.");
       return;
     }
+    flushSaveToDb();
     setIsSubmitting(true);
     try {
       if (stage === "outline") updateSubmission(state.submission.id, { outlineSubmittedAt: Date.now() });
       else if (stage === "draft") updateSubmission(state.submission.id, { draftSubmittedAt: Date.now() });
       else updateSubmission(state.submission.id, { reviseSubmittedAt: Date.now() });
+      setStageEditUnlocked((prev) => ({ ...prev, [stage]: false }));
+      bumpDb();
+      setShowSubmitSuccess(true);
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function onEditStage(stage: Stage) {
+    setStageEditUnlocked((prev) => ({ ...prev, [stage]: true }));
+  }
+
+  function canShowSubmit(stage: Stage) {
+    if (!state.ok) return false;
+    const s = state.submission;
+    if (stageApproved(s, stage)) return false;
+    const sub = stageSubmitted(s, stage);
+    if (!sub) return true;
+    return stageEditUnlocked[stage];
+  }
+
+  function canShowEdit(stage: Stage) {
+    if (!state.ok) return false;
+    const s = state.submission;
+    if (stageApproved(s, stage)) return false;
+    const sub = stageSubmitted(s, stage);
+    return sub && !stageEditUnlocked[stage];
   }
 
   if (!state.ok) {
@@ -204,19 +327,12 @@ export default function WritePage() {
     );
   }
 
-  const lockedByApproval =
-    (tab === "outline" && !!state.submission.outlineSubmittedAt && !state.submission.outlineApprovedAt) ||
-    (tab === "draft" && !!state.submission.draftSubmittedAt && !state.submission.draftApprovedAt) ||
-    (tab === "revise" && !!state.submission.reviseSubmittedAt && !state.submission.reviseApprovedAt);
-
   const contextHint = `${state.assignment.title} / ${stageLabel(tab)} / 학생 ${studentNo}`;
-  const editorDisabled = lockedByApproval;
   const currentStageForSelection = tab;
-
-  const attachments = state.assignment.attachments || [];
+  const locked = editorLocked(tab);
 
   function onEditorMouseUp(e: React.MouseEvent<HTMLTextAreaElement>) {
-    if (editorDisabled) return;
+    if (locked) return;
     const el = e.currentTarget;
     const start = el.selectionStart ?? 0;
     const end = el.selectionEnd ?? 0;
@@ -229,7 +345,6 @@ export default function WritePage() {
       setSelection(null);
       return;
     }
-    // 드래그한 “옆” 느낌으로: mouseup 지점 근처에 버튼 표시
     setSelection({
       stage: currentStageForSelection,
       text,
@@ -241,18 +356,106 @@ export default function WritePage() {
   function sendSelectionToAi() {
     if (!selection) return;
     setAiReference(selection.text);
-    // AI로 보낸 뒤 선택 UI는 정리(원하면 유지 가능)
     setSelection(null);
   }
 
+  async function onDownloadAssignment() {
+    if (!state.ok) return;
+    setError(null);
+    setIsAssignmentDownload(true);
+    try {
+      await downloadAssignmentZip(state.assignment);
+    } catch {
+      setError("과제 자료를 내려받지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setIsAssignmentDownload(false);
+    }
+  }
+
+  const onResizeWidthStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = tutorWidth;
+      const onMove = (ev: MouseEvent) => {
+        const delta = startX - ev.clientX;
+        setTutorWidth(Math.min(560, Math.max(240, startW + delta)));
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      document.body.style.cursor = "ew-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [tutorWidth],
+  );
+
+  const onResizeHeightStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = tutorHeight;
+      const onMove = (ev: MouseEvent) => {
+        const maxH = typeof window !== "undefined" ? window.innerHeight - 32 : 900;
+        const delta = ev.clientY - startY;
+        setTutorHeight(Math.min(maxH, Math.max(280, startH + delta)));
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [tutorHeight],
+  );
+
+  function onResolveNote(noteId: string) {
+    resolveFeedbackNote(noteId);
+    bumpDb();
+  }
+
+  const spStatus = stageStatusPill(tab);
+  const approvedNow = stageApproved(state.submission, tab);
+  const submitDisabled =
+    !currentText(tab).trim() ||
+    isSubmitting ||
+    !canShowSubmit(tab);
+
   return (
     <div className={styles.page}>
-      <AttachmentDrawer
-        attachments={attachments}
-        isOpen={attachmentOpen}
-        onClose={() => setAttachmentOpen(false)}
-      />
-      <div className={styles.shell}>
+      <Modal
+        isOpen={showSubmitSuccess}
+        onClose={() => setShowSubmitSuccess(false)}
+        title="완료되었습니다!"
+        description="제출이 반영되었습니다."
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setShowSubmitSuccess(false)}>
+            확인
+          </Button>
+        }
+      >
+        <div style={{ fontSize: 14, opacity: 0.85, lineHeight: 1.55 }}>
+          교사 검토 후 다음 단계로 진행할 수 있습니다.
+        </div>
+      </Modal>
+
+      <div
+        className={styles.shell}
+        style={{
+          gridTemplateColumns: `minmax(286px, 390px) minmax(0, 1fr) ${tutorWidth}px`,
+        }}
+      >
         <aside className={styles.assignmentPanel}>
           <div className={styles.assignmentScroll}>
             <div className={styles.assignmentTitle}>{state.assignment.title}</div>
@@ -272,10 +475,10 @@ export default function WritePage() {
             <button
               type="button"
               className={styles.attachBtn}
-              disabled={attachments.length === 0}
-              onClick={() => setAttachmentOpen(true)}
+              disabled={isAssignmentDownload}
+              onClick={() => void onDownloadAssignment()}
             >
-              {attachments.length === 0 ? "등록된 첨부 없음" : "첨부파일 보기"}
+              {isAssignmentDownload ? "준비 중…" : "과제 다운로드"}
             </button>
           </div>
         </aside>
@@ -317,12 +520,31 @@ export default function WritePage() {
             </button>
           </div>
 
-          <div className={styles.body}>
-            <div className={styles.statusRow}>
-              <div className={styles.pill}>{stageLabel(tab)}</div>
-              <div className={styles.pill}>{approvalPill(tab)}</div>
+          <div className={styles.stageToolbar}>
+            <div className={styles.stageToolbarLeft}>
+              <span className={styles.stageTitle}>{stageLabel(tab)}</span>
+              <span className={[styles.statusPill, spStatus.className].join(" ")}>{spStatus.label}</span>
             </div>
+            <div className={styles.stageToolbarRight}>
+              {!approvedNow ? (
+                <button
+                  type="button"
+                  className={styles.stepBtnPrimary}
+                  disabled={submitDisabled}
+                  onClick={() => void onSubmitStage(tab)}
+                >
+                  {isSubmitting ? "제출 중…" : "제출하기"}
+                </button>
+              ) : null}
+              {canShowEdit(tab) ? (
+                <button type="button" className={styles.stepBtnSecondary} onClick={() => onEditStage(tab)}>
+                  수정하기
+                </button>
+              ) : null}
+            </div>
+          </div>
 
+          <div className={styles.body}>
             <div className={styles.editorLabel}>
               {tab === "outline"
                 ? "개요는 Markdown으로 작성할 수 있어요."
@@ -339,7 +561,7 @@ export default function WritePage() {
                   ? "- 주장\n  - 근거 1\n  - 근거 2\n- 예상 반론과 재반박\n"
                   : "여기에 글을 작성하세요…"
               }
-              disabled={lockedByApproval}
+              disabled={locked}
             />
 
             {selection ? (
@@ -390,7 +612,7 @@ export default function WritePage() {
                       <div className={styles.teacherText}>{n.teacherText}</div>
                       <button
                         className={styles.smallBtn}
-                        onClick={() => resolveFeedbackNote(n.id)}
+                        onClick={() => onResolveNote(n.id)}
                         title="이 메모에 대한 첨삭을 완료했으면 완료 처리하세요."
                       >
                         첨삭 완료
@@ -412,23 +634,23 @@ export default function WritePage() {
 
             {error ? <div className={styles.error}>{error}</div> : null}
 
-            <Button
-              onClick={() => onSubmit(tab)}
-              isLoading={isSubmitting}
-              disabled={lockedByApproval}
-            >
-              제출하기
+            <Button onClick={() => void onSaveClick()} isLoading={isSaving} variant="secondary">
+              저장하기
             </Button>
           </div>
         </div>
 
-        <div className={styles.tutorCol}>
-          <AiTutor
-            submissionId={state.submission.id}
-            stage={tab}
-            contextHint={contextHint}
-            referenceText={aiReference}
-          />
+        <div className={styles.tutorCol} style={{ height: tutorHeight }}>
+          <div className={styles.tutorResizeWidth} onMouseDown={onResizeWidthStart} title="너비 조절" />
+          <div className={styles.tutorInner}>
+            <AiTutor
+              submissionId={state.submission.id}
+              stage={tab}
+              contextHint={contextHint}
+              referenceText={aiReference}
+            />
+          </div>
+          <div className={styles.tutorResizeHeight} onMouseDown={onResizeHeightStart} title="높이 조절" />
         </div>
       </div>
 
@@ -436,7 +658,10 @@ export default function WritePage() {
         <button
           type="button"
           className={styles.questionFloat}
-          style={{ left: Math.min(selection.x + 10, window.innerWidth - 50), top: Math.min(selection.y + 10, window.innerHeight - 50) }}
+          style={{
+            left: Math.min(selection.x + 10, typeof window !== "undefined" ? window.innerWidth - 50 : 400),
+            top: Math.min(selection.y + 10, typeof window !== "undefined" ? window.innerHeight - 50 : 400),
+          }}
           onClick={sendSelectionToAi}
           title="선택 구간을 AI 튜터에 참고로 보내기"
         >
@@ -446,4 +671,3 @@ export default function WritePage() {
     </div>
   );
 }
-

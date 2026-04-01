@@ -20,7 +20,7 @@ export const handler: Handler = async (event) => {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const modelName =
-      process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+      process.env.GEMINI_MODEL?.trim() || "gemini-3.1-pro-preview";
     const model = genAI.getGenerativeModel({ model: modelName });
     const result = await model.generateContent(parsed.data.prompt);
     const text = result.response.text();

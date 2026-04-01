@@ -12,6 +12,7 @@ import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModa
 import { loadTeacherSettings } from "@/lib/teacherSettings";
 import { CreateAssignmentModal } from "@/components/teacher/CreateAssignmentModal";
 import { ShareAssignmentModal } from "@/components/teacher/ShareAssignmentModal";
+import { StudentCodeExport } from "@/components/teacher/StudentCodeExport";
 
 export default function TeacherPage() {
   const { user, isLoading } = useAuth();
@@ -207,12 +208,18 @@ export default function TeacherPage() {
                 <div className={styles.panelTitle}>
                   {selectedClass.name} · 학생 목록(코드)
                 </div>
-                <button
-                  className={styles.tinyButton}
-                  onClick={() => setSelectedClassId(null)}
-                >
-                  닫기
-                </button>
+                <div className={styles.studentPanelActions}>
+                  <StudentCodeExport
+                    roomName={selectedClass.name}
+                    students={selectedClass.students}
+                  />
+                  <button
+                    className={styles.tinyButton}
+                    onClick={() => setSelectedClassId(null)}
+                  >
+                    닫기
+                  </button>
+                </div>
               </div>
               <div className={styles.students}>
                 {selectedClass.students.map((s) => (

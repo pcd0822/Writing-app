@@ -1,4 +1,8 @@
 .wrap {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
@@ -26,7 +30,8 @@
 }
 
 .chat {
-  height: 340px;
+  flex: 1;
+  min-height: 120px;
   overflow: auto;
   padding: 12px;
   display: flex;

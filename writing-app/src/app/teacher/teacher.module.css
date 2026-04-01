@@ -72,6 +72,15 @@
 .panelTitle {
   font-weight: 750;
   letter-spacing: -0.02em;
+  flex: 1;
+  min-width: 0;
+}
+
+.studentPanelActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .classes {
