@@ -8,7 +8,7 @@ import {
   createShareLink,
   isShareActive,
   loadTeacherDb,
-  revokeShareLink,
+  revokeAllSharesForAssignment,
   saveTeacherDb,
 } from "@/lib/localDb";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
@@ -92,12 +92,12 @@ export function ShareAssignmentModal({
   }
 
   async function onRevoke() {
-    if (!activeShare) return;
+    if (!activeShare || !assignmentId) return;
     setError(null);
     setIsRevoking(true);
     try {
       const db0 = loadTeacherDb();
-      const next = revokeShareLink(db0, activeShare.token);
+      const next = revokeAllSharesForAssignment(db0, assignmentId);
       saveTeacherDb(next);
       setLocalVer((v) => v + 1); // 모달 내 즉시 갱신
       onChanged();

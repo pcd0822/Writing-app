@@ -10,6 +10,30 @@ type Props = {
   onClose: () => void;
 };
 
+async function downloadDataUrlAsFile(name: string, dataUrl: string) {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name || "download";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = name || "download";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+}
+
 export function AttachmentDrawer({ attachments, isOpen, onClose }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -46,9 +70,14 @@ export function AttachmentDrawer({ attachments, isOpen, onClose }: Props) {
     }
     return (
       <div className={styles.fallback}>
-        <a href={selected.dataUrl} download={selected.name} className={styles.dl}>
-          파일 열기 / 다운로드
-        </a>
+        <p className={styles.fallbackHint}>미리보기를 지원하지 않는 형식입니다. 상단의 다운로드로 저장하세요.</p>
+        <button
+          type="button"
+          className={styles.dlBtn}
+          onClick={() => downloadDataUrlAsFile(selected.name, selected.dataUrl!)}
+        >
+          이 파일 다운로드
+        </button>
       </div>
     );
   }, [selected]);
@@ -73,9 +102,20 @@ export function AttachmentDrawer({ attachments, isOpen, onClose }: Props) {
       <div className={styles.inner}>
         <div className={styles.header}>
           <div className={styles.headerTitle}>첨부파일</div>
-          <button type="button" className={styles.iconBtn} onClick={onClose} aria-label="닫기">
-            ×
-          </button>
+          <div className={styles.headerActions}>
+            {selected?.dataUrl ? (
+              <button
+                type="button"
+                className={styles.downloadBtn}
+                onClick={() => downloadDataUrlAsFile(selected.name, selected.dataUrl!)}
+              >
+                다운로드
+              </button>
+            ) : null}
+            <button type="button" className={styles.iconBtn} onClick={onClose} aria-label="닫기">
+              ×
+            </button>
+          </div>
         </div>
         <div className={styles.list}>
           {attachments.map((a, i) => (

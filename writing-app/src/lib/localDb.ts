@@ -168,6 +168,22 @@ export function revokeShareLink(db: TeacherDb, token: string): TeacherDb {
   };
 }
 
+/** 해당 과제에 남아 있는 다른 공유까지 모두 폐기해, 유효 링크가 없도록 함 */
+export function revokeAllSharesForAssignment(
+  db: TeacherDb,
+  assignmentId: string,
+): TeacherDb {
+  const now = Date.now();
+  return {
+    ...db,
+    shares: db.shares.map((s) =>
+      s.assignmentId === assignmentId && s.revokedAt == null
+        ? { ...s, revokedAt: now }
+        : s,
+    ),
+  };
+}
+
 export function findShare(db: TeacherDb, token: string) {
   return db.shares.find((s) => s.token === token) || null;
 }

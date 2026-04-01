@@ -42,6 +42,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
@@ -49,6 +50,31 @@
 .headerTitle {
   font-weight: 800;
   font-size: 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.downloadBtn {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.22);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.downloadBtn:active {
+  transform: translateY(1px);
 }
 
 .iconBtn {
@@ -141,6 +167,30 @@
 .dl {
   color: rgba(147, 197, 253, 0.95);
   text-decoration: underline;
+}
+
+.fallbackHint {
+  margin: 0 0 10px 0;
+  line-height: 1.5;
+}
+
+.dlBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.dlBtn:active {
+  transform: translateY(1px);
 }
 
 .grab {

@@ -302,6 +302,41 @@
   opacity: 0.9;
 }
 
+/* 개요 마크다운 미리보기: 긴 단어·코드가 패널 밖으로 넘치지 않도록 */
+.markdownPreview {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.markdownPreview :global(p) {
+  margin: 0 0 0.5em 0;
+}
+
+.markdownPreview :global(pre),
+.markdownPreview :global(code) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.markdownPreview :global(pre) {
+  overflow-x: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.markdownPreview :global(ul),
+.markdownPreview :global(ol) {
+  margin: 0.25em 0 0.5em 1.1em;
+  padding: 0;
+}
+
 .noteItem {
   display: flex;
   flex-direction: column;

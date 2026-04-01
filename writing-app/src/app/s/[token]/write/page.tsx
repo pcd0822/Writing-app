@@ -361,7 +361,9 @@ export default function WritePage() {
             {tab === "outline" && currentText("outline").trim() ? (
               <div className={styles.noteBox}>
                 <div className={styles.noteTitle}>개요 미리보기</div>
-                <ReactMarkdown>{currentText("outline")}</ReactMarkdown>
+                <div className={styles.markdownPreview}>
+                  <ReactMarkdown>{currentText("outline")}</ReactMarkdown>
+                </div>
               </div>
             ) : null}
 
