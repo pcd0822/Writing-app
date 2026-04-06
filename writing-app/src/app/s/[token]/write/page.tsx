@@ -532,8 +532,13 @@ export default function WritePage() {
     setIsAssignmentDownload(true);
     try {
       await downloadAssignmentZip(state.assignment);
-    } catch {
-      setError("과제 자료를 내려받지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setError(
+        msg.trim()
+          ? msg
+          : "첨부를 내려받지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
     } finally {
       setIsAssignmentDownload(false);
     }
@@ -634,7 +639,7 @@ export default function WritePage() {
               disabled={isAssignmentDownload}
               onClick={() => void onDownloadAssignment()}
             >
-              {isAssignmentDownload ? "준비 중…" : "과제 다운로드"}
+              {isAssignmentDownload ? "준비 중…" : "첨부 다운로드"}
             </button>
 
             <div className={styles.sectionLabel} style={{ marginTop: 12 }}>
