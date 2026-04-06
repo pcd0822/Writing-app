@@ -105,7 +105,18 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
       const settings = loadTeacherSettings();
       let attachments: Attachment[] = [];
 
+      /** Netlify JSON 본문 한도 — base64 포함 시 약 4MB 원본까지 권장 */
+      const MAX_DRIVE_FILE = 4 * 1024 * 1024;
+
       if (settings?.driveFolderId && files.length > 0) {
+        for (const f of files) {
+          if (f.size > MAX_DRIVE_FILE) {
+            setError(
+              `드라이브 업로드는 파일당 ${MAX_DRIVE_FILE / 1024 / 1024}MB 이하만 가능합니다. (${f.name})`,
+            );
+            return;
+          }
+        }
         for (const f of files) {
           const dataBase64 = await fileToBase64(f);
           const att = await uploadFileToDriveAssignment({
@@ -161,8 +172,13 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
       setSelectedTargets(new Set());
       onCreated();
       onClose();
-    } catch {
-      setError("저장 중 오류가 발생했습니다. 다시 시도해주세요.");
+    } catch (e) {
+      console.error(e);
+      setError(
+        e instanceof Error
+          ? e.message || "저장 중 오류가 발생했습니다. 다시 시도해주세요."
+          : "저장 중 오류가 발생했습니다. 다시 시도해주세요.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -243,7 +259,7 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
             ) : (
               <div className={styles.hint}>
                 {loadTeacherSettings()?.driveFolderId
-                  ? "드라이브 연동됨: 첨부는 구글 드라이브에 올라가며 학생도 다운로드할 수 있습니다. (파일당 약 5MB까지)"
+                  ? "드라이브 연동됨: 첨부는 구글 드라이브에 올라갑니다. 파일당 약 4MB 이하(서버 전송 한도)."
                   : "드라이브 미연동 시: 파일당 약 1.5MB 이하만 기기에 함께 저장됩니다. 시트 DB와 함께 쓰려면 상단「드라이브 연동」을 권장합니다."}
               </div>
             )}

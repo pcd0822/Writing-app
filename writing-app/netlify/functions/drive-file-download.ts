@@ -7,7 +7,7 @@ const BodySchema = z.object({
   driveFileId: z.string().min(10),
 });
 
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024;
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return handleOptions();

@@ -118,7 +118,16 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
       let attachments: Attachment[] = [...(prev.attachments ?? [])];
       if (files.length) {
         const settings = loadTeacherSettings();
+        const MAX_DRIVE_FILE = 4 * 1024 * 1024;
         if (settings?.driveFolderId) {
+          for (const f of files) {
+            if (f.size > MAX_DRIVE_FILE) {
+              setError(
+                `드라이브 업로드는 파일당 ${MAX_DRIVE_FILE / 1024 / 1024}MB 이하만 가능합니다. (${f.name})`,
+              );
+              return;
+            }
+          }
           for (const f of files) {
             const dataBase64 = await fileToBase64(f);
             const att = await uploadFileToDriveAssignment({
@@ -173,8 +182,13 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
       setFiles([]);
       onSaved();
       onClose();
-    } catch {
-      setError("저장 중 오류가 발생했습니다. 다시 시도해주세요.");
+    } catch (e) {
+      console.error(e);
+      setError(
+        e instanceof Error
+          ? e.message || "저장 중 오류가 발생했습니다. 다시 시도해주세요."
+          : "저장 중 오류가 발생했습니다. 다시 시도해주세요.",
+      );
     } finally {
       setIsSaving(false);
     }

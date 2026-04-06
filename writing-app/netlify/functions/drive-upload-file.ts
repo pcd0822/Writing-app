@@ -11,7 +11,8 @@ const BodySchema = z.object({
   dataBase64: z.string().min(1),
 });
 
-const MAX_BYTES = 5 * 1024 * 1024; // Netlify 요청 한도 고려
+/** Netlify JSON 본문(~6MB) 한도 — base64 오버헤드 고려 */
+const MAX_BYTES = 4 * 1024 * 1024;
 
 async function ensureAssignmentFolder(
   drive: ReturnType<typeof getDriveClient>,

@@ -1,17 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: [
-          // Firebase Google 로그인(Popup)에서 COOP 이슈로 인증 흐름이 깨지는 경우를 방지
-          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
-        ],
-      },
-    ];
-  },
+  // COOP를 켜두면 Firebase 팝업이 window.close() 할 때 브라우저 경고가 날 수 있어 기본(헤더 없음)으로 둡니다.
 };
 
 export default nextConfig;
