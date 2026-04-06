@@ -44,6 +44,7 @@ export const handler: Handler = async (event) => {
         body: Readable.from(buf),
       },
       fields: "id,name,size,mimeType",
+      supportsAllDrives: true,
     });
 
     const fileId = created.data.id;
@@ -55,6 +56,7 @@ export const handler: Handler = async (event) => {
         role: "reader",
         type: "anyone",
       },
+      supportsAllDrives: true,
     });
 
     const driveDownloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;

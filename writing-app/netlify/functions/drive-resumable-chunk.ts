@@ -85,6 +85,7 @@ export const handler: Handler = async (event) => {
         role: "reader",
         type: "anyone",
       },
+      supportsAllDrives: true,
     });
 
     const driveDownloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;

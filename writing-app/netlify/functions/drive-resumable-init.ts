@@ -34,7 +34,7 @@ export const handler: Handler = async (event) => {
     const mime = mimeType || "application/octet-stream";
 
     const initRes = await fetch(
-      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,size",
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,name,mimeType,size",
       {
         method: "POST",
         headers: {

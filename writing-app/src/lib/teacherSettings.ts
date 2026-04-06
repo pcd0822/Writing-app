@@ -2,7 +2,7 @@ const KEY = "writing-app:teacherSettings:v1";
 
 export type TeacherSettings = {
   spreadsheetId: string;
-  /** drive-init으로 생성한 루트 폴더 ID */
+  /** 교사 드라이브 폴더 ID(서비스 계정에 편집자 공유됨) */
   driveFolderId?: string;
 };
 

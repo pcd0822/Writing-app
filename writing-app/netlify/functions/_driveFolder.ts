@@ -13,6 +13,8 @@ export async function ensureAssignmentFolder(
     q,
     fields: "files(id)",
     pageSize: 5,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
   const existing = res.data.files?.[0]?.id;
   if (existing) return existing;
@@ -24,6 +26,7 @@ export async function ensureAssignmentFolder(
       parents: [rootId],
     },
     fields: "id",
+    supportsAllDrives: true,
   });
   const id = created.data.id;
   if (!id) throw new Error("과제 폴더를 만들지 못했습니다.");

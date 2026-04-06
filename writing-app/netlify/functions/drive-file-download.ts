@@ -23,6 +23,7 @@ export const handler: Handler = async (event) => {
     const meta = await drive.files.get({
       fileId: driveFileId,
       fields: "mimeType,size",
+      supportsAllDrives: true,
     });
     const size = Number(meta.data.size || 0);
     if (size > MAX_BYTES) {
@@ -30,7 +31,7 @@ export const handler: Handler = async (event) => {
     }
 
     const res = await drive.files.get(
-      { fileId: driveFileId, alt: "media" },
+      { fileId: driveFileId, alt: "media", supportsAllDrives: true },
       { responseType: "arraybuffer" },
     );
     const ab = res.data as ArrayBuffer;
