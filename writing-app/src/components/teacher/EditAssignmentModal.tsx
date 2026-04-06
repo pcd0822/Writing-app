@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import styles from "./CreateAssignmentModal.module.css";
-import { fileToBase64 } from "@/lib/fileBase64";
-import { uploadFileToDriveAssignment } from "@/lib/driveAssignmentUpload";
+import { uploadAssignmentFileToDrive } from "@/lib/driveAssignmentUpload";
 import { loadTeacherDb, saveTeacherDb, setAllocation } from "@/lib/localDb";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
 import type { AssignmentTarget, Attachment } from "@/lib/types";
@@ -118,25 +117,9 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
       let attachments: Attachment[] = [...(prev.attachments ?? [])];
       if (files.length) {
         const settings = loadTeacherSettings();
-        const MAX_DRIVE_FILE = 4 * 1024 * 1024;
         if (settings?.driveFolderId) {
           for (const f of files) {
-            if (f.size > MAX_DRIVE_FILE) {
-              setError(
-                `드라이브 업로드는 파일당 ${MAX_DRIVE_FILE / 1024 / 1024}MB 이하만 가능합니다. (${f.name})`,
-              );
-              return;
-            }
-          }
-          for (const f of files) {
-            const dataBase64 = await fileToBase64(f);
-            const att = await uploadFileToDriveAssignment({
-              driveRootFolderId: settings.driveFolderId,
-              assignmentId,
-              fileName: f.name,
-              mimeType: f.type || undefined,
-              dataBase64,
-            });
+            const att = await uploadAssignmentFileToDrive(f, assignmentId, settings.driveFolderId);
             attachments.push(att);
           }
         } else {

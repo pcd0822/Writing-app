@@ -1,6 +1,8 @@
 import type { Handler } from "@netlify/functions";
+import { Readable } from "node:stream";
 import { z } from "zod";
 import { getDriveClient } from "./_googleAuth";
+import { ensureAssignmentFolder } from "./_driveFolder";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -11,36 +13,8 @@ const BodySchema = z.object({
   dataBase64: z.string().min(1),
 });
 
-/** Netlify JSON 본문(~6MB) 한도 — base64 오버헤드 고려 */
+/** 단일 요청 업로드 — Netlify 본문 한도 내(재개 업로드는 drive-resumable-*) */
 const MAX_BYTES = 4 * 1024 * 1024;
-
-async function ensureAssignmentFolder(
-  drive: ReturnType<typeof getDriveClient>,
-  rootId: string,
-  assignmentId: string,
-): Promise<string> {
-  const escaped = assignmentId.replace(/'/g, "\\'");
-  const q = `name='${escaped}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const res = await drive.files.list({
-    q,
-    fields: "files(id)",
-    pageSize: 5,
-  });
-  const existing = res.data.files?.[0]?.id;
-  if (existing) return existing;
-
-  const created = await drive.files.create({
-    requestBody: {
-      name: assignmentId,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: [rootId],
-    },
-    fields: "id",
-  });
-  const id = created.data.id;
-  if (!id) throw new Error("과제 폴더를 만들지 못했습니다.");
-  return id;
-}
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return handleOptions();
@@ -67,7 +41,7 @@ export const handler: Handler = async (event) => {
       },
       media: {
         mimeType: mimeType || "application/octet-stream",
-        body: buf,
+        body: Readable.from(buf),
       },
       fields: "id,name,size,mimeType",
     });

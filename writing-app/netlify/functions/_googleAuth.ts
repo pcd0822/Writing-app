@@ -44,3 +44,10 @@ export function getDriveClient() {
   const auth = getGoogleJwt();
   return google.drive({ version: "v3", auth });
 }
+
+export async function getGoogleAccessToken(): Promise<string> {
+  const auth = getGoogleJwt();
+  const t = await auth.getAccessToken();
+  if (!t.token) throw new Error("Google 액세스 토큰을 받지 못했습니다.");
+  return t.token;
+}
