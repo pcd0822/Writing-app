@@ -2,8 +2,10 @@ const KEY = "writing-app:teacherSettings:v1";
 
 export type TeacherSettings = {
   spreadsheetId: string;
-  /** 교사 드라이브 폴더 ID(서비스 계정에 편집자 공유됨) */
+  /** 과제 첨부를 올릴 Google Drive 폴더 ID(교사 본인 계정의 폴더) */
   driveFolderId?: string;
+  /** Google OAuth — Drive API 업로드용(교사 계정 용량으로 저장) */
+  driveOAuthRefreshToken?: string;
 };
 
 export function loadTeacherSettings(): TeacherSettings | null {

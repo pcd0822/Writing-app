@@ -1,8 +1,7 @@
 import type { Handler } from "@netlify/functions";
 import { z } from "zod";
 import { driveStorageFileName } from "./_driveUploadNames";
-import { quotaHintFromGoogleError } from "./_driveQuotaMessage";
-import { getGoogleAccessToken } from "./_googleAuth";
+import { getAccessTokenFromRefresh } from "./_driveOAuthClient";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -11,6 +10,7 @@ const BodySchema = z.object({
   fileName: z.string().min(1),
   mimeType: z.string().optional(),
   totalSize: z.number().int().positive(),
+  refreshToken: z.string().min(1),
 });
 
 const MAX_TOTAL = 10 * 1024 * 1024;
@@ -22,13 +22,14 @@ export const handler: Handler = async (event) => {
   const parsed = parseJsonBody(event, BodySchema);
   if (!parsed.ok) return json(400, { error: parsed.error });
 
-  const { driveRootFolderId, assignmentId, fileName, mimeType, totalSize } = parsed.data;
+  const { driveRootFolderId, assignmentId, fileName, mimeType, totalSize, refreshToken } =
+    parsed.data;
   if (totalSize > MAX_TOTAL) {
     return json(400, { error: `파일은 최대 ${MAX_TOTAL / 1024 / 1024}MB까지 업로드할 수 있습니다.` });
   }
 
   try {
-    const token = await getGoogleAccessToken();
+    const token = await getAccessTokenFromRefresh(refreshToken);
     const mime = mimeType || "application/octet-stream";
     const storageName = driveStorageFileName(assignmentId, fileName);
 
@@ -51,9 +52,8 @@ export const handler: Handler = async (event) => {
 
     if (!initRes.ok) {
       const errText = await initRes.text();
-      const hint = quotaHintFromGoogleError(errText);
       return json(502, {
-        error: `드라이브 업로드 세션 실패: ${initRes.status} ${errText.slice(0, 400)}${hint}`,
+        error: `드라이브 업로드 세션 실패: ${initRes.status} ${errText.slice(0, 400)}`,
       });
     }
 

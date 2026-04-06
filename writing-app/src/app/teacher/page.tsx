@@ -97,9 +97,10 @@ export default function TeacherPage() {
     return loadTeacherSettings()?.spreadsheetId || null;
   }, [dbVersion]);
 
-  const driveFolderId = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return loadTeacherSettings()?.driveFolderId || null;
+  const driveReady = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const s = loadTeacherSettings();
+    return !!(s?.driveFolderId && s?.driveOAuthRefreshToken);
   }, [dbVersion]);
 
   function refreshDb() {
@@ -135,7 +136,7 @@ export default function TeacherPage() {
               onClick={() => setIsDriveSetupOpen(true)}
               title="구글 드라이브에 과제 첨부 저장"
             >
-              {driveFolderId ? "📁 드라이브 연결됨" : "📁 드라이브 연동"}
+              {driveReady ? "📁 드라이브 연결됨" : "📁 드라이브 연동"}
             </button>
             <button className={styles.tinyButton} onClick={onSignOut} disabled={isSigningOut}>
               {isSigningOut ? "로그아웃 중…" : "로그아웃"}

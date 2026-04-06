@@ -21,9 +21,8 @@ function extractFolderIdFromInput(raw: string): string {
 }
 
 export function DriveSetupModal({ isOpen, onClose, onSaved }: Props) {
-  const connectedFolderId = loadTeacherSettings()?.driveFolderId;
   const [folderIdInput, setFolderIdInput] = useState("");
-  const [serviceEmail, setServiceEmail] = useState<string | null>(null);
+  const [hasOAuth, setHasOAuth] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,19 +30,52 @@ export function DriveSetupModal({ isOpen, onClose, onSaved }: Props) {
     if (!isOpen) return;
     const s = loadTeacherSettings();
     setFolderIdInput(s?.driveFolderId || "");
+    setHasOAuth(!!s?.driveOAuthRefreshToken?.trim());
     setError(null);
-    void callFunction<{ ok: true; clientEmail: string }>("drive-service-email", {})
-      .then((r) => setServiceEmail(r.clientEmail))
-      .catch(() => setServiceEmail(null));
   }, [isOpen]);
 
-  async function onConnect() {
+  async function onStartGoogleOAuth() {
     setError(null);
     const prev = loadTeacherSettings();
     if (!prev?.spreadsheetId) {
       setError("먼저 구글 스프레드시트(DB) 연결을 완료해주세요.");
       return;
     }
+    try {
+      const redirectUri = `${window.location.origin}/teacher/drive-callback`;
+      const res = await callFunction<{ ok: true; url: string }>("google-drive-oauth-url", {
+        redirectUri,
+      });
+      window.location.href = res.url;
+    } catch (e) {
+      setError((e as Error).message || "OAuth URL 생성 실패");
+    }
+  }
+
+  function onDisconnectGoogle() {
+    const prev = loadTeacherSettings();
+    if (!prev?.spreadsheetId) return;
+    saveTeacherSettings({
+      spreadsheetId: prev.spreadsheetId,
+      driveFolderId: prev.driveFolderId,
+      driveOAuthRefreshToken: undefined,
+    });
+    setHasOAuth(false);
+    onSaved();
+  }
+
+  async function onSaveFolder() {
+    setError(null);
+    const prev = loadTeacherSettings();
+    if (!prev?.spreadsheetId) {
+      setError("먼저 구글 스프레드시트(DB) 연결을 완료해주세요.");
+      return;
+    }
+    if (!prev.driveOAuthRefreshToken?.trim()) {
+      setError("먼저 아래「Google 계정으로 연결」을 완료해주세요.");
+      return;
+    }
+
     const folderId = extractFolderIdFromInput(folderIdInput);
     if (!folderId) {
       setError("폴더 ID 또는 폴더 URL을 입력해주세요.");
@@ -56,10 +88,14 @@ export function DriveSetupModal({ isOpen, onClose, onSaved }: Props) {
         ok: true;
         folderId: string;
         folderName: string;
-      }>("drive-verify-folder", { folderId });
+      }>("drive-verify-folder", {
+        folderId,
+        refreshToken: prev.driveOAuthRefreshToken,
+      });
       saveTeacherSettings({
         spreadsheetId: prev.spreadsheetId,
         driveFolderId: res.folderId,
+        driveOAuthRefreshToken: prev.driveOAuthRefreshToken,
       });
       onSaved();
       onClose();
@@ -70,54 +106,79 @@ export function DriveSetupModal({ isOpen, onClose, onSaved }: Props) {
     }
   }
 
+  const connectedFolderId = loadTeacherSettings()?.driveFolderId;
+  const oauthOk = hasOAuth || !!loadTeacherSettings()?.driveOAuthRefreshToken?.trim();
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title="구글 드라이브(첨부) 연결"
-      description="서비스 계정에는 저장 용량이 없습니다. 교사님 드라이브의 폴더를 만든 뒤, 아래 이메일을 그 폴더에 편집자로 공유한 다음 폴더 ID를 입력하세요."
+      description="과제 첨부는 교사님 Google 계정 용량에 저장됩니다. 서비스 계정 공유 방식은 사용하지 않습니다."
       size="lg"
       footer={
         <div className={styles.footer}>
           <Button variant="secondary" onClick={onClose} disabled={isSaving}>
             닫기
           </Button>
-          <Button onClick={() => void onConnect()} isLoading={isSaving}>
-            연결 확인
+          <Button onClick={() => void onSaveFolder()} isLoading={isSaving} disabled={!oauthOk}>
+            폴더 저장
           </Button>
         </div>
       }
     >
       <div className={styles.body}>
         <div className={styles.hint} style={{ marginBottom: 14 }}>
-          <b>1)</b> Google Drive에서 새 <b>폴더</b>를 만듭니다.
+          <b>1)</b> Google Cloud Console → API 및 서비스 → 사용자 인증 정보에서{" "}
+          <b>OAuth 2.0 클라이언트 ID</b>(웹 애플리케이션)를 만들고, 승인된 리디렉션 URI에{" "}
+          <span className={styles.mono}>
+            https://(배포주소)/teacher/drive-callback
+          </span>{" "}
+          및 로컬용 <span className={styles.mono}>http://localhost:3000/teacher/drive-callback</span> 등을
+          넣으세요.
           <br />
-          <b>2)</b> 폴더를 우클릭 → <b>공유</b> → 아래 서비스 계정 이메일을 <b>편집자</b>로
-          추가합니다.
+          <b>2)</b> 아래 버튼으로 <b>같은 Google 계정</b>(과제를 저장할 Drive가 있는 계정)으로 로그인합니다.
           <br />
-          <b>3)</b> 폴더를 연 뒤 주소창의 <span className={styles.mono}>/folders/뒤의_ID</span>를
-          복사하거나, 아래 칸에 붙여넣습니다.
+          <b>3)</b> 그 계정의 Drive에서 폴더를 만들고, 주소의 <span className={styles.mono}>/folders/</span>{" "}
+          뒤 ID를 입력한 뒤 <b>폴더 저장</b>을 누릅니다.
         </div>
 
-        {serviceEmail ? (
-          <div
-            className={styles.mono}
-            style={{
-              marginBottom: 12,
-              padding: "10px 12px",
-              background: "#f1f5f9",
-              borderRadius: 10,
-              fontSize: 13,
-              wordBreak: "break-all",
-            }}
-          >
-            {serviceEmail}
-          </div>
-        ) : (
-          <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.75 }}>
-            서비스 계정 이메일을 불러오는 중…
-          </div>
-        )}
+        <div style={{ marginBottom: 14 }}>
+          {oauthOk ? (
+            <div
+              style={{
+                padding: "10px 12px",
+                background: "#ecfdf5",
+                borderRadius: 10,
+                fontSize: 13,
+                color: "#065f46",
+              }}
+            >
+              Google 계정 연결됨 (refresh token 저장됨)
+            </div>
+          ) : (
+            <Button type="button" variant="secondary" onClick={() => void onStartGoogleOAuth()}>
+              Google 계정으로 드라이브 연결
+            </Button>
+          )}
+          {oauthOk ? (
+            <button
+              type="button"
+              onClick={onDisconnectGoogle}
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "#64748b",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Google 연결 해제
+            </button>
+          ) : null}
+        </div>
 
         <label className={styles.label}>
           <span>폴더 ID 또는 폴더 URL</span>
@@ -126,19 +187,18 @@ export function DriveSetupModal({ isOpen, onClose, onSaved }: Props) {
             value={folderIdInput}
             onChange={(e) => setFolderIdInput(e.target.value)}
             placeholder="예) 1a2b3c... 또는 https://drive.google.com/drive/folders/..."
+            disabled={!oauthOk}
           />
         </label>
 
         {connectedFolderId ? (
           <div className={styles.hint} style={{ marginTop: 12 }}>
-            현재 연결: <span className={styles.mono}>{connectedFolderId}</span>
+            저장된 폴더: <span className={styles.mono}>{connectedFolderId}</span>
           </div>
         ) : null}
 
         <div className={styles.hint} style={{ marginTop: 12 }}>
-          업로드된 파일은 학생이 받을 수 있도록 &quot;링크가 있는 모든 사용자&quot; 읽기로
-          공개됩니다. 공유 드라이브를 쓰는 경우에도, 서비스 계정을 해당 드라이브 멤버로 두면 같은 방식으로
-          사용할 수 있습니다.
+          업로드된 파일은 학생이 받을 수 있도록 &quot;링크가 있는 모든 사용자&quot; 읽기로 공개됩니다.
         </div>
 
         {error ? <div className={styles.error}>{error}</div> : null}

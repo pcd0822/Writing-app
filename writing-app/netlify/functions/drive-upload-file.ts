@@ -2,8 +2,7 @@ import type { Handler } from "@netlify/functions";
 import { Readable } from "node:stream";
 import { z } from "zod";
 import { driveStorageFileName } from "./_driveUploadNames";
-import { quotaHintFromGoogleError } from "./_driveQuotaMessage";
-import { getDriveClient } from "./_googleAuth";
+import { getDriveClientFromRefreshToken } from "./_driveOAuthClient";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -12,6 +11,7 @@ const BodySchema = z.object({
   fileName: z.string().min(1),
   mimeType: z.string().optional(),
   dataBase64: z.string().min(1),
+  refreshToken: z.string().min(1),
 });
 
 /** 단일 요청 업로드 — Netlify 본문 한도 내(재개 업로드는 drive-resumable-*) */
@@ -24,7 +24,8 @@ export const handler: Handler = async (event) => {
   const parsed = parseJsonBody(event, BodySchema);
   if (!parsed.ok) return json(400, { error: parsed.error });
 
-  const { driveRootFolderId, assignmentId, fileName, mimeType, dataBase64 } = parsed.data;
+  const { driveRootFolderId, assignmentId, fileName, mimeType, dataBase64, refreshToken } =
+    parsed.data;
 
   try {
     const buf = Buffer.from(dataBase64, "base64");
@@ -32,7 +33,7 @@ export const handler: Handler = async (event) => {
       return json(400, { error: `파일 한도 ${MAX_BYTES / 1024 / 1024}MB 이하만 업로드할 수 있습니다.` });
     }
 
-    const drive = getDriveClient();
+    const drive = getDriveClientFromRefreshToken(refreshToken);
     const storageName = driveStorageFileName(assignmentId, fileName);
 
     const created = await drive.files.create({
@@ -73,7 +74,6 @@ export const handler: Handler = async (event) => {
       },
     });
   } catch (e) {
-    const msg = (e as Error).message || "drive-upload-file failed";
-    return json(500, { error: msg + quotaHintFromGoogleError(msg) });
+    return json(500, { error: (e as Error).message || "drive-upload-file failed" });
   }
 };

@@ -117,9 +117,9 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
       let attachments: Attachment[] = [...(prev.attachments ?? [])];
       if (files.length) {
         const settings = loadTeacherSettings();
-        if (settings?.driveFolderId) {
+        if (settings?.driveFolderId && settings?.driveOAuthRefreshToken) {
           for (const f of files) {
-            const att = await uploadAssignmentFileToDrive(f, assignmentId, settings.driveFolderId);
+            const att = await uploadAssignmentFileToDrive(f, assignmentId);
             attachments.push(att);
           }
         } else {

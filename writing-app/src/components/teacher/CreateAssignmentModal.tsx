@@ -104,9 +104,9 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
       const settings = loadTeacherSettings();
       let attachments: Attachment[] = [];
 
-      if (settings?.driveFolderId && files.length > 0) {
+      if (settings?.driveFolderId && settings?.driveOAuthRefreshToken && files.length > 0) {
         for (const f of files) {
-          const att = await uploadAssignmentFileToDrive(f, assignmentId, settings.driveFolderId);
+          const att = await uploadAssignmentFileToDrive(f, assignmentId);
           attachments.push(att);
         }
       } else {
@@ -239,9 +239,9 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
               </div>
             ) : (
               <div className={styles.hint}>
-                {loadTeacherSettings()?.driveFolderId
-                  ? "드라이브 연동됨: 첨부는 구글 드라이브에 올라갑니다. 파일당 최대 약 10MB."
-                  : "드라이브 미연동 시: 파일당 약 1.5MB 이하만 기기에 함께 저장됩니다. 시트 DB와 함께 쓰려면 상단「드라이브 연동」을 권장합니다."}
+                {loadTeacherSettings()?.driveFolderId && loadTeacherSettings()?.driveOAuthRefreshToken
+                  ? "드라이브 연동됨: 첨부는 교사 Google 계정 드라이브에 올라갑니다. 파일당 최대 약 10MB."
+                  : "드라이브 미연동 시: 파일당 약 1.5MB 이하만 기기에 함께 저장됩니다. 시트·첨부를 쓰려면 상단「드라이브 연동」에서 Google 계정 연결 후 폴더 ID를 저장하세요."}
               </div>
             )}
           </label>

@@ -33,7 +33,11 @@ export function SpreadsheetSetupModal({ isOpen, onClose, onSaved }: Props) {
     try {
       await callFunction<{ ok: true }>("sheets-init", { spreadsheetId: id });
       const prev = loadTeacherSettings();
-      saveTeacherSettings({ spreadsheetId: id, driveFolderId: prev?.driveFolderId });
+      saveTeacherSettings({
+        spreadsheetId: id,
+        driveFolderId: prev?.driveFolderId,
+        driveOAuthRefreshToken: prev?.driveOAuthRefreshToken,
+      });
       setActiveSpreadsheetId(id);
       // 시트에 기존 DB가 있으면 pull해서 로컬을 최신으로 맞춤(기기 이동 대비)
       const remote = await pullDbFromSheet(id);

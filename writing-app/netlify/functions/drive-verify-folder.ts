@@ -1,16 +1,16 @@
 import type { Handler } from "@netlify/functions";
 import { Readable } from "node:stream";
 import { z } from "zod";
-import { quotaHintFromGoogleError } from "./_driveQuotaMessage";
-import { getDriveClient } from "./_googleAuth";
+import { getDriveClientFromRefreshToken } from "./_driveOAuthClient";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
   folderId: z.string().min(10),
+  refreshToken: z.string().min(1),
 });
 
 /**
- * 교사가 소유·공유한 폴더인지 확인하고, 서비스 계정으로 실제 파일 생성이 되는지 검사합니다.
+ * 교사 OAuth 계정으로 폴더에 접근·쓰기 가능한지 확인합니다.
  */
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return handleOptions();
@@ -19,10 +19,10 @@ export const handler: Handler = async (event) => {
   const parsed = parseJsonBody(event, BodySchema);
   if (!parsed.ok) return json(400, { error: parsed.error });
 
-  const { folderId } = parsed.data;
+  const { folderId, refreshToken } = parsed.data;
 
   try {
-    const drive = getDriveClient();
+    const drive = getDriveClientFromRefreshToken(refreshToken);
     const r = await drive.files.get({
       fileId: folderId,
       fields: "id,name,mimeType,capabilities",
@@ -40,35 +40,30 @@ export const handler: Handler = async (event) => {
     const canEdit = data.capabilities?.canEdit;
     if (canEdit === false) {
       return json(403, {
-        error:
-          "이 폴더에 편집할 수 없습니다. 서비스 계정 이메일을 폴더에 ‘편집자’로 공유했는지 확인하세요.",
+        error: "이 폴더에 편집할 수 없습니다. 같은 Google 계정으로 만든 폴더인지 확인하세요.",
       });
     }
 
     const probeName = `.writing-app-write-test-${Date.now()}.txt`;
     let probeId: string | null = null;
     try {
-      const probe = await drive.files.create(
-        {
-          requestBody: {
-            name: probeName,
-            parents: [folderId],
-          },
-          media: {
-            mimeType: "text/plain",
-            body: Readable.from(Buffer.from("ok", "utf8")),
-          },
-          fields: "id",
-          supportsAllDrives: true,
+      const probe = await drive.files.create({
+        requestBody: {
+          name: probeName,
+          parents: [folderId],
         },
-      );
+        media: {
+          mimeType: "text/plain",
+          body: Readable.from(Buffer.from("ok", "utf8")),
+        },
+        fields: "id",
+        supportsAllDrives: true,
+      });
       probeId = probe.data.id || null;
     } catch (writeErr) {
       const raw = String((writeErr as Error).message || writeErr);
       return json(403, {
-        error:
-          `이 폴더에 파일을 만들 수 없습니다. ${raw.slice(0, 200)}` +
-          quotaHintFromGoogleError(raw),
+        error: `이 폴더에 파일을 만들 수 없습니다. ${raw.slice(0, 240)}`,
       });
     }
 
@@ -76,7 +71,7 @@ export const handler: Handler = async (event) => {
       try {
         await drive.files.delete({ fileId: probeId, supportsAllDrives: true });
       } catch {
-        /* 삭제 실패는 무시 — 테스트 파일이 남을 수 있음 */
+        /* ignore */
       }
     }
 
@@ -89,7 +84,7 @@ export const handler: Handler = async (event) => {
     const msg = (e as Error).message || "";
     const hint =
       msg.includes("404") || msg.includes("not found")
-        ? " 폴더 ID가 잘못되었거나, 서비스 계정에 폴더가 공유되지 않았을 수 있습니다."
+        ? " 폴더 ID가 잘못되었거나, OAuth로 로그인한 계정과 폴더 소유 계정이 다를 수 있습니다."
         : "";
     return json(500, {
       error: `폴더를 확인할 수 없습니다.${hint} ${msg.slice(0, 200)}`,

@@ -1,6 +1,6 @@
 import type { Handler } from "@netlify/functions";
 import { z } from "zod";
-import { getDriveClient } from "./_googleAuth";
+import { getDriveClientFromRefreshToken } from "./_driveOAuthClient";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -11,6 +11,7 @@ const BodySchema = z.object({
   totalSize: z.number().int().positive(),
   fileName: z.string().min(1),
   mimeType: z.string().optional(),
+  refreshToken: z.string().min(1),
 });
 
 /** Netlify 요청 한도 안에서 한 번에 보낼 디코드 크기 상한 */
@@ -23,8 +24,16 @@ export const handler: Handler = async (event) => {
   const parsed = parseJsonBody(event, BodySchema);
   if (!parsed.ok) return json(400, { error: parsed.error });
 
-  const { sessionUrl, base64Chunk, rangeStart, rangeEnd, totalSize, fileName, mimeType } =
-    parsed.data;
+  const {
+    sessionUrl,
+    base64Chunk,
+    rangeStart,
+    rangeEnd,
+    totalSize,
+    fileName,
+    mimeType,
+    refreshToken,
+  } = parsed.data;
 
   if (rangeEnd < rangeStart || rangeStart >= totalSize) {
     return json(400, { error: "잘못된 Content-Range입니다." });
@@ -78,7 +87,7 @@ export const handler: Handler = async (event) => {
       return json(502, { error: "업로드 완료 응답에 파일 ID가 없습니다." });
     }
 
-    const drive = getDriveClient();
+    const drive = getDriveClientFromRefreshToken(refreshToken);
     await drive.permissions.create({
       fileId,
       requestBody: {
