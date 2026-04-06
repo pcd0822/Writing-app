@@ -12,7 +12,13 @@ import {
   type Score,
   type TeacherDb,
 } from "./types";
-import { getActiveSpreadsheetId, pullDbFromSheet, pushDbToSheet } from "./spreadsheetSync";
+import { normalizeDriveAttachmentsInDb } from "./attachments";
+import {
+  getActiveSpreadsheetId,
+  pullDbFromSheet,
+  pushDbToSheet,
+  setActiveSpreadsheetId,
+} from "./spreadsheetSync";
 
 const KEY = "writing-app:teacherDb:v1";
 
@@ -121,13 +127,20 @@ export function loadTeacherDb(): TeacherDb {
   }
 }
 
-export function saveTeacherDb(db: TeacherDb) {
+export function saveTeacherDb(
+  db: TeacherDb,
+  options?: { spreadsheetId?: string | null },
+) {
   assertBrowser();
-  window.localStorage.setItem(KEY, JSON.stringify(db));
-  const sid = getActiveSpreadsheetId();
-  if (sid) {
-    // fire-and-forget: 모든 변경이 시트로 동기화되게 함
-    void pushDbToSheet(sid, db).catch(() => {});
+  const normalized = normalizeDriveAttachmentsInDb(db);
+  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  const pushId =
+    (options?.spreadsheetId && String(options.spreadsheetId).trim()) ||
+    getActiveSpreadsheetId();
+  if (pushId) {
+    void pushDbToSheet(pushId, normalized).catch((err) => {
+      console.error("[Writing app] pushDbToSheet failed:", err);
+    });
   }
 }
 
@@ -275,6 +288,7 @@ export function getOrCreateSubmission(params: {
 export function updateSubmission(
   submissionId: string,
   patch: Partial<Submission>,
+  options?: { spreadsheetId?: string | null },
 ): Submission {
   const db = loadTeacherDb();
   const idx = db.submissions.findIndex((s) => s.id === submissionId);
@@ -286,7 +300,9 @@ export function updateSubmission(
   };
   const nextSubmissions = [...db.submissions];
   nextSubmissions[idx] = updated;
-  saveTeacherDb({ ...db, submissions: nextSubmissions });
+  saveTeacherDb({ ...db, submissions: nextSubmissions }, {
+    spreadsheetId: options?.spreadsheetId,
+  });
   return updated;
 }
 
@@ -340,14 +356,16 @@ export function mergeTeacherDbForStudentView(local: TeacherDb, remote: TeacherDb
 }
 
 /** 시트에서 최신 DB를 가져와 학생 화면 기준으로 병합 후 저장 */
-export async function mergeStudentViewFromRemote(): Promise<void> {
-  const sid = getActiveSpreadsheetId();
+export async function mergeStudentViewFromRemote(
+  spreadsheetId?: string | null,
+): Promise<void> {
+  const sid = spreadsheetId?.trim() || getActiveSpreadsheetId();
   if (!sid) return;
   try {
     const remote = await pullDbFromSheet(sid);
     if (!remote) return;
     const merged = mergeTeacherDbForStudentView(loadTeacherDb(), remote as TeacherDb);
-    saveTeacherDb(merged);
+    saveTeacherDb(merged, { spreadsheetId: sid });
   } catch {
     /* 네트워크 실패 시 로컬 유지 */
   }
@@ -357,9 +375,12 @@ export async function mergeStudentViewFromRemote(): Promise<void> {
 export async function updateSubmissionWithRemoteMerge(
   submissionId: string,
   patch: Partial<Submission>,
+  options?: { spreadsheetId?: string | null },
 ): Promise<Submission> {
-  await mergeStudentViewFromRemote();
-  return updateSubmission(submissionId, patch);
+  const sid = options?.spreadsheetId?.trim() || getActiveSpreadsheetId();
+  if (sid) setActiveSpreadsheetId(sid);
+  await mergeStudentViewFromRemote(sid);
+  return updateSubmission(submissionId, patch, { spreadsheetId: sid });
 }
 
 export function createFeedbackNoteId() {
@@ -373,7 +394,10 @@ export function addFeedbackNote(note: FeedbackNote): FeedbackNote {
   return note;
 }
 
-export function resolveFeedbackNote(noteId: string) {
+export function resolveFeedbackNote(
+  noteId: string,
+  options?: { spreadsheetId?: string | null },
+) {
   const db = loadTeacherDb();
   const now = Date.now();
   const next = {
@@ -382,13 +406,18 @@ export function resolveFeedbackNote(noteId: string) {
       n.id === noteId ? { ...n, resolvedAt: now } : n,
     ),
   };
-  saveTeacherDb(next);
+  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId });
 }
 
-export async function addAiLog(log: AiLog) {
-  await mergeStudentViewFromRemote();
+export async function addAiLog(
+  log: AiLog,
+  options?: { spreadsheetId?: string | null },
+) {
+  const sid = options?.spreadsheetId?.trim() || getActiveSpreadsheetId();
+  if (sid) setActiveSpreadsheetId(sid);
+  await mergeStudentViewFromRemote(sid);
   const db = loadTeacherDb();
-  saveTeacherDb({ ...db, aiLogs: [log, ...db.aiLogs] });
+  saveTeacherDb({ ...db, aiLogs: [log, ...db.aiLogs] }, { spreadsheetId: sid });
 }
 
 export function upsertScore(score: Score) {

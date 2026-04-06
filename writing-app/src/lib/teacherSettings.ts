@@ -2,6 +2,8 @@ const KEY = "writing-app:teacherSettings:v1";
 
 export type TeacherSettings = {
   spreadsheetId: string;
+  /** drive-init으로 생성한 루트 폴더 ID */
+  driveFolderId?: string;
 };
 
 export function loadTeacherSettings(): TeacherSettings | null {

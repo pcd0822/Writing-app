@@ -4,8 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import styles from "./CreateAssignmentModal.module.css";
+import { fileToBase64 } from "@/lib/fileBase64";
+import { uploadFileToDriveAssignment } from "@/lib/driveAssignmentUpload";
 import { loadTeacherDb, saveTeacherDb, setAllocation } from "@/lib/localDb";
-import type { AssignmentTarget } from "@/lib/types";
+import { loadTeacherSettings } from "@/lib/teacherSettings";
+import type { AssignmentTarget, Attachment } from "@/lib/types";
 
 type Props = {
   isOpen: boolean;
@@ -107,34 +110,49 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
 
     setIsSaving(true);
     try {
-      const MAX_DATA = 1.5 * 1024 * 1024;
-      const readDataUrl = (f: File) =>
-        new Promise<string | undefined>((resolve) => {
-          if (f.size > MAX_DATA) {
-            resolve(undefined);
-            return;
-          }
-          const r = new FileReader();
-          r.onload = () => resolve(typeof r.result === "string" ? r.result : undefined);
-          r.onerror = () => resolve(undefined);
-          r.readAsDataURL(f);
-        });
       const fresh = loadTeacherDb();
       const idx = fresh.assignments.findIndex((a) => a.id === assignmentId);
       if (idx < 0) return setError("과제를 찾을 수 없습니다.");
       const prev = fresh.assignments[idx]!;
 
-      let attachments = [...(prev.attachments ?? [])];
+      let attachments: Attachment[] = [...(prev.attachments ?? [])];
       if (files.length) {
-        const nextAtt = await Promise.all(
-          files.map(async (f) => ({
-            name: f.name,
-            type: f.type,
-            size: f.size,
-            dataUrl: await readDataUrl(f),
-          })),
-        );
-        attachments = [...attachments, ...nextAtt];
+        const settings = loadTeacherSettings();
+        if (settings?.driveFolderId) {
+          for (const f of files) {
+            const dataBase64 = await fileToBase64(f);
+            const att = await uploadFileToDriveAssignment({
+              driveRootFolderId: settings.driveFolderId,
+              assignmentId,
+              fileName: f.name,
+              mimeType: f.type || undefined,
+              dataBase64,
+            });
+            attachments.push(att);
+          }
+        } else {
+          const MAX_DATA = 1.5 * 1024 * 1024;
+          const readDataUrl = (f: File) =>
+            new Promise<string | undefined>((resolve) => {
+              if (f.size > MAX_DATA) {
+                resolve(undefined);
+                return;
+              }
+              const r = new FileReader();
+              r.onload = () => resolve(typeof r.result === "string" ? r.result : undefined);
+              r.onerror = () => resolve(undefined);
+              r.readAsDataURL(f);
+            });
+          const nextAtt = await Promise.all(
+            files.map(async (f) => ({
+              name: f.name,
+              type: f.type,
+              size: f.size,
+              dataUrl: await readDataUrl(f),
+            })),
+          );
+          attachments = [...attachments, ...nextAtt];
+        }
       }
 
       const nextAssignments = [...fresh.assignments];

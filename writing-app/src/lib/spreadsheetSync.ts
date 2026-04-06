@@ -1,4 +1,6 @@
+import { prepareDbForSheetPush } from "./attachments";
 import { callFunction } from "./netlifyClient";
+import type { TeacherDb } from "./types";
 
 const ACTIVE_SID_KEY = "writing-app:activeSpreadsheetId";
 
@@ -18,6 +20,7 @@ export async function pullDbFromSheet(spreadsheetId: string) {
 }
 
 export async function pushDbToSheet(spreadsheetId: string, db: unknown) {
-  await callFunction<{ ok: true }>("db-set", { spreadsheetId, db });
+  const payload = prepareDbForSheetPush(db as TeacherDb);
+  await callFunction<{ ok: true }>("db-set", { spreadsheetId, db: payload });
 }
 

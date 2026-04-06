@@ -6,6 +6,16 @@
   color: #0f172a;
 }
 
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  font-size: 14px;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
 .shell {
   max-width: 100%;
   margin: 0 auto;

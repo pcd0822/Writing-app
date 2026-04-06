@@ -18,8 +18,11 @@ export const AttachmentSchema = z.object({
   name: z.string().min(1),
   type: z.string().optional(),
   size: z.number().int().nonnegative().optional(),
-  /** 교사 업로드 시 base64 data URL (학생 화면 미리보기용, 용량 제한 있음) */
+  /** 드라이브 미사용·소용량일 때만 로컬/시트에 둠. driveFileId가 있으면 저장하지 않음 */
   dataUrl: z.string().optional(),
+  /** 드라이브 업로드 시 — 시트에는 id·다운로드 URL만 저장, 본문은 저장하지 않음 */
+  driveFileId: z.string().optional(),
+  driveDownloadUrl: z.string().optional(),
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 

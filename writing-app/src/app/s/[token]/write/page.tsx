@@ -17,7 +17,16 @@ import {
   resolveFeedbackNote,
   updateSubmissionWithRemoteMerge,
 } from "@/lib/localDb";
-import type { Stage } from "@/lib/types";
+import type {
+  Assignment,
+  ClassRoom,
+  FeedbackNote,
+  Score,
+  ShareLink,
+  Stage,
+  Submission,
+  TeacherDb,
+} from "@/lib/types";
 import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/finalReport";
 import { setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 
@@ -45,6 +54,19 @@ function stageApproved(s: { outlineApprovedAt: number | null; draftApprovedAt: n
 }
 
 type EditUnlock = Record<Stage, boolean>;
+
+type WriteState =
+  | { ok: false; reason: "loading" | "missing" | "share" | "assignment" | "student" | "error" }
+  | {
+      ok: true;
+      db: TeacherDb;
+      share: ShareLink;
+      assignment: Assignment;
+      cls: ClassRoom;
+      submission: Submission;
+      notes: FeedbackNote[];
+      score: Score | null;
+    };
 
 export default function WritePage() {
   const params = useParams<{ token: string }>();
@@ -76,22 +98,37 @@ export default function WritePage() {
     revise: false,
   });
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [feedbackPanelTab, setFeedbackPanelTab] = useState<FeedbackPanelTab>("outline");
   const [feedbackNoteModalId, setFeedbackNoteModalId] = useState<string | null>(null);
   const [tutorWidth, setTutorWidth] = useState(320);
   const [tutorHeight, setTutorHeight] = useState(520);
 
-  const state = useMemo(() => {
-    if (!token || !studentNo) return { ok: false as const, reason: "missing" };
+  const [state, setState] = useState<WriteState>({ ok: false, reason: "loading" });
+
+  useEffect(() => {
+    if (!token || !studentNo) {
+      setState({ ok: false, reason: "missing" });
+      return;
+    }
     try {
       const db = loadTeacherDb();
       const share = findShare(db, token);
-      if (!share || !isShareActive(share)) return { ok: false as const, reason: "share" };
+      if (!share || !isShareActive(share)) {
+        setState({ ok: false, reason: "share" });
+        return;
+      }
       const assignment = db.assignments.find((a) => a.id === share.assignmentId) || null;
-      if (!assignment) return { ok: false as const, reason: "assignment" };
+      if (!assignment) {
+        setState({ ok: false, reason: "assignment" });
+        return;
+      }
       const cls =
         db.classes.find((c) => c.students.some((s) => s.studentNo === studentNo)) || null;
-      if (!cls) return { ok: false as const, reason: "student" };
+      if (!cls) {
+        setState({ ok: false, reason: "student" });
+        return;
+      }
       const { submission } = getOrCreateSubmission({
         assignmentId: assignment.id,
         classId: cls.id,
@@ -101,9 +138,18 @@ export default function WritePage() {
         .filter((n) => n.submissionId === submission.id && !n.resolvedAt)
         .sort((a, b) => a.createdAt - b.createdAt);
       const score = db.scores.find((s) => s.submissionId === submission.id) || null;
-      return { ok: true as const, db, share, assignment, cls, submission, notes, score };
+      setState({
+        ok: true,
+        db,
+        share,
+        assignment,
+        cls,
+        submission,
+        notes,
+        score,
+      });
     } catch {
-      return { ok: false as const, reason: "error" };
+      setState({ ok: false, reason: "error" });
     }
   }, [token, studentNo, dbBump]);
 
@@ -112,6 +158,11 @@ export default function WritePage() {
     sid.trim() ||
     (state.ok && state.share.spreadsheetId ? state.share.spreadsheetId.trim() : "") ||
     "";
+
+  const sheetSaveOpts = useMemo(
+    () => ({ spreadsheetId: effectiveSheetId || undefined }),
+    [effectiveSheetId],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -153,7 +204,9 @@ export default function WritePage() {
     if (!effectiveSheetId) return;
     setActiveSpreadsheetId(effectiveSheetId);
     const tick = () => {
-      void mergeStudentViewFromRemote().then(() => setDbBump((v) => v + 1));
+      void mergeStudentViewFromRemote(effectiveSheetId).then(() =>
+        setDbBump((v) => v + 1),
+      );
     };
     tick();
     const id = window.setInterval(tick, 10000);
@@ -234,11 +287,23 @@ export default function WritePage() {
         if (!state.ok) return;
         try {
           if (stage === "outline") {
-            await updateSubmissionWithRemoteMerge(state.submission.id, { outlineText: text });
+            await updateSubmissionWithRemoteMerge(
+              state.submission.id,
+              { outlineText: text },
+              sheetSaveOpts,
+            );
           } else if (stage === "draft") {
-            await updateSubmissionWithRemoteMerge(state.submission.id, { draftText: text });
+            await updateSubmissionWithRemoteMerge(
+              state.submission.id,
+              { draftText: text },
+              sheetSaveOpts,
+            );
           } else {
-            await updateSubmissionWithRemoteMerge(state.submission.id, { reviseText: text });
+            await updateSubmissionWithRemoteMerge(
+              state.submission.id,
+              { reviseText: text },
+              sheetSaveOpts,
+            );
           }
           bumpDb();
         } catch {
@@ -254,11 +319,15 @@ export default function WritePage() {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    await updateSubmissionWithRemoteMerge(state.submission.id, {
-      outlineText,
-      draftText,
-      reviseText,
-    });
+    await updateSubmissionWithRemoteMerge(
+      state.submission.id,
+      {
+        outlineText,
+        draftText,
+        reviseText,
+      },
+      sheetSaveOpts,
+    );
     bumpDb();
   }
 
@@ -268,6 +337,7 @@ export default function WritePage() {
     setIsSaving(true);
     try {
       await flushSaveToDb();
+      setShowSaveSuccess(true);
     } finally {
       setIsSaving(false);
     }
@@ -360,11 +430,23 @@ export default function WritePage() {
     setIsSubmitting(true);
     try {
       if (stage === "outline") {
-        await updateSubmissionWithRemoteMerge(state.submission.id, { outlineSubmittedAt: Date.now() });
+        await updateSubmissionWithRemoteMerge(
+          state.submission.id,
+          { outlineSubmittedAt: Date.now() },
+          sheetSaveOpts,
+        );
       } else if (stage === "draft") {
-        await updateSubmissionWithRemoteMerge(state.submission.id, { draftSubmittedAt: Date.now() });
+        await updateSubmissionWithRemoteMerge(
+          state.submission.id,
+          { draftSubmittedAt: Date.now() },
+          sheetSaveOpts,
+        );
       } else {
-        await updateSubmissionWithRemoteMerge(state.submission.id, { reviseSubmittedAt: Date.now() });
+        await updateSubmissionWithRemoteMerge(
+          state.submission.id,
+          { reviseSubmittedAt: Date.now() },
+          sheetSaveOpts,
+        );
       }
       setStageEditUnlocked((prev) => ({ ...prev, [stage]: false }));
       bumpDb();
@@ -396,6 +478,13 @@ export default function WritePage() {
   }
 
   if (!state.ok) {
+    if (state.reason === "loading") {
+      return (
+        <div className={styles.page}>
+          <div className={styles.loading}>불러오는 중…</div>
+        </div>
+      );
+    }
     return (
       <div className={styles.page}>
         <div className={styles.error}>
@@ -451,8 +540,8 @@ export default function WritePage() {
   }
 
   async function onResolveNote(noteId: string) {
-    await mergeStudentViewFromRemote();
-    resolveFeedbackNote(noteId);
+    await mergeStudentViewFromRemote(effectiveSheetId);
+    resolveFeedbackNote(noteId, sheetSaveOpts);
     bumpDb();
   }
 
@@ -479,6 +568,23 @@ export default function WritePage() {
       >
         <div style={{ fontSize: 14, opacity: 0.85, lineHeight: 1.55 }}>
           교사 검토 후 다음 단계로 진행할 수 있습니다.
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showSaveSuccess}
+        onClose={() => setShowSaveSuccess(false)}
+        title="저장 완료"
+        description="작성 내용이 저장되었습니다."
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setShowSaveSuccess(false)}>
+            확인
+          </Button>
+        }
+      >
+        <div style={{ fontSize: 14, lineHeight: 1.55, color: "#0f172a" }}>
+          저장이 완료되었습니다! 구글 스프레드시트에 연결된 경우 잠시 후 시트에도 반영됩니다.
         </div>
       </Modal>
 
@@ -752,6 +858,7 @@ export default function WritePage() {
               stage={tab}
               contextHint={contextHint}
               referenceText={aiReference}
+              spreadsheetId={effectiveSheetId || undefined}
             />
           </div>
           <div className={styles.tutorResizeHeight} onMouseDown={onResizeHeightStart} title="높이 조절" />

@@ -8,6 +8,7 @@ import { CreateClassModal } from "@/components/teacher/CreateClassModal";
 import { loadTeacherDb, saveTeacherDb } from "@/lib/localDb";
 import styles from "./teacher.module.css";
 import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModal";
+import { DriveSetupModal } from "@/components/teacher/DriveSetupModal";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
 import { CreateAssignmentModal } from "@/components/teacher/CreateAssignmentModal";
 import { ShareAssignmentModal } from "@/components/teacher/ShareAssignmentModal";
@@ -20,6 +21,7 @@ export default function TeacherPage() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isCreateClassOpen, setIsCreateClassOpen] = useState(false);
   const [isSheetSetupOpen, setIsSheetSetupOpen] = useState(false);
+  const [isDriveSetupOpen, setIsDriveSetupOpen] = useState(false);
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [shareAssignmentId, setShareAssignmentId] = useState<string | null>(null);
   const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null);
@@ -95,6 +97,11 @@ export default function TeacherPage() {
     return loadTeacherSettings()?.spreadsheetId || null;
   }, [dbVersion]);
 
+  const driveFolderId = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return loadTeacherSettings()?.driveFolderId || null;
+  }, [dbVersion]);
+
   function refreshDb() {
     setDbVersion((v) => v + 1);
   }
@@ -122,6 +129,13 @@ export default function TeacherPage() {
               title="구글 스프레드시트(DB) 연결"
             >
               {sheetId ? "📗 DB 연결됨" : "📎 DB 연결"}
+            </button>
+            <button
+              className={styles.tinyButton}
+              onClick={() => setIsDriveSetupOpen(true)}
+              title="구글 드라이브에 과제 첨부 저장"
+            >
+              {driveFolderId ? "📁 드라이브 연결됨" : "📁 드라이브 연동"}
             </button>
             <button className={styles.tinyButton} onClick={onSignOut} disabled={isSigningOut}>
               {isSigningOut ? "로그아웃 중…" : "로그아웃"}
@@ -273,6 +287,11 @@ export default function TeacherPage() {
       <SpreadsheetSetupModal
         isOpen={isSheetSetupOpen}
         onClose={() => setIsSheetSetupOpen(false)}
+        onSaved={refreshDb}
+      />
+      <DriveSetupModal
+        isOpen={isDriveSetupOpen}
+        onClose={() => setIsDriveSetupOpen(false)}
         onSaved={refreshDb}
       />
       <CreateAssignmentModal

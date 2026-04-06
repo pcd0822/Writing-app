@@ -11,7 +11,10 @@ import {
   saveTeacherDb,
   setAllocation,
 } from "@/lib/localDb";
-import type { AssignmentTarget } from "@/lib/types";
+import { fileToBase64 } from "@/lib/fileBase64";
+import { uploadFileToDriveAssignment } from "@/lib/driveAssignmentUpload";
+import { loadTeacherSettings } from "@/lib/teacherSettings";
+import type { AssignmentTarget, Attachment } from "@/lib/types";
 
 type Props = {
   isOpen: boolean;
@@ -99,26 +102,43 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
     setIsSaving(true);
     try {
       const assignmentId = createAssignmentId();
-      const MAX_DATA = 1.5 * 1024 * 1024; // 시트/로컬 저장 한도 고려
-      const readDataUrl = (f: File) =>
-        new Promise<string | undefined>((resolve) => {
-          if (f.size > MAX_DATA) {
-            resolve(undefined);
-            return;
-          }
-          const r = new FileReader();
-          r.onload = () => resolve(typeof r.result === "string" ? r.result : undefined);
-          r.onerror = () => resolve(undefined);
-          r.readAsDataURL(f);
-        });
-      const attachments = await Promise.all(
-        files.map(async (f) => ({
-          name: f.name,
-          type: f.type,
-          size: f.size,
-          dataUrl: await readDataUrl(f),
-        })),
-      );
+      const settings = loadTeacherSettings();
+      let attachments: Attachment[] = [];
+
+      if (settings?.driveFolderId && files.length > 0) {
+        for (const f of files) {
+          const dataBase64 = await fileToBase64(f);
+          const att = await uploadFileToDriveAssignment({
+            driveRootFolderId: settings.driveFolderId,
+            assignmentId,
+            fileName: f.name,
+            mimeType: f.type || undefined,
+            dataBase64,
+          });
+          attachments.push(att);
+        }
+      } else {
+        const MAX_DATA = 1.5 * 1024 * 1024; // 시트/로컬 저장 한도 고려
+        const readDataUrl = (f: File) =>
+          new Promise<string | undefined>((resolve) => {
+            if (f.size > MAX_DATA) {
+              resolve(undefined);
+              return;
+            }
+            const r = new FileReader();
+            r.onload = () => resolve(typeof r.result === "string" ? r.result : undefined);
+            r.onerror = () => resolve(undefined);
+            r.readAsDataURL(f);
+          });
+        attachments = await Promise.all(
+          files.map(async (f) => ({
+            name: f.name,
+            type: f.type,
+            size: f.size,
+            dataUrl: await readDataUrl(f),
+          })),
+        );
+      }
       const assignment = {
         id: assignmentId,
         title: t,
@@ -222,8 +242,9 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
               </div>
             ) : (
               <div className={styles.hint}>
-                파일당 약 1.5MB 이하이면 학생 화면에서 미리보기용으로 함께 저장됩니다. 더 큰 파일은
-                파일명·용량만 저장됩니다.
+                {loadTeacherSettings()?.driveFolderId
+                  ? "드라이브 연동됨: 첨부는 구글 드라이브에 올라가며 학생도 다운로드할 수 있습니다. (파일당 약 5MB까지)"
+                  : "드라이브 미연동 시: 파일당 약 1.5MB 이하만 기기에 함께 저장됩니다. 시트 DB와 함께 쓰려면 상단「드라이브 연동」을 권장합니다."}
               </div>
             )}
           </label>

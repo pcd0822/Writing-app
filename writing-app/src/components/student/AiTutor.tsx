@@ -29,12 +29,19 @@ export function AiTutor({
   stage,
   contextHint,
   referenceText,
+  spreadsheetId,
 }: {
   submissionId: string;
   stage: Stage;
   contextHint: string;
   referenceText?: string | null;
+  /** 시트 동기화용(공유 링크·URL sid와 동일) */
+  spreadsheetId?: string;
 }) {
+  const sheetOpts = useMemo(
+    () => ({ spreadsheetId: spreadsheetId?.trim() || undefined }),
+    [spreadsheetId],
+  );
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,14 +79,17 @@ export function AiTutor({
 
     const studentMsg: Msg = { id: nanoid(10), role: "student", text: q };
     setMsgs((m) => [...m, studentMsg]);
-    await addAiLog({
-      id: nanoid(12),
-      submissionId,
-      stage,
-      createdAt: Date.now(),
-      role: "student",
-      text: q,
-    });
+    await addAiLog(
+      {
+        id: nanoid(12),
+        submissionId,
+        stage,
+        createdAt: Date.now(),
+        role: "student",
+        text: q,
+      },
+      sheetOpts,
+    );
 
     setInput("");
     setIsSending(true);
@@ -102,14 +112,17 @@ export function AiTutor({
         text: assistantText,
       };
       setMsgs((m) => [...m, assistantMsg]);
-      await addAiLog({
-        id: nanoid(12),
-        submissionId,
-        stage,
-        createdAt: Date.now(),
-        role: "assistant",
-        text: assistantText,
-      });
+      await addAiLog(
+        {
+          id: nanoid(12),
+          submissionId,
+          stage,
+          createdAt: Date.now(),
+          role: "assistant",
+          text: assistantText,
+        },
+        sheetOpts,
+      );
     } catch (e) {
       setError((e as Error).message || "전송 실패");
     } finally {

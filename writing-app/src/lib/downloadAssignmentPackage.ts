@@ -1,3 +1,4 @@
+import { callFunction } from "./netlifyClient";
 import type { Assignment, Attachment } from "./types";
 
 function safeSegment(name: string) {
@@ -69,6 +70,28 @@ export async function downloadAssignmentZip(assignment: Assignment) {
           `${outName}.안내.txt`,
           bom +
             `「${a.name}」 파일은 용량 제한으로 패키지에 넣지 못했습니다. 교사에게 원본을 요청하세요.\n`,
+        );
+      }
+    } else if (a.driveFileId) {
+      try {
+        const res = await callFunction<{
+          ok: true;
+          mimeType: string;
+          dataBase64: string;
+        }>("drive-file-download", { driveFileId: a.driveFileId });
+        const blob = await fetch(`data:${res.mimeType};base64,${res.dataBase64}`).then((r) =>
+          r.blob(),
+        );
+        root.file(outName, blob);
+      } catch {
+        const hint =
+          a.driveDownloadUrl != null
+            ? `브라우저에서 직접 열기: ${a.driveDownloadUrl}\n`
+            : "";
+        root.file(
+          `${outName}.안내.txt`,
+          bom +
+            `「${a.name}」 파일을 서버에서 가져오지 못했습니다. ${hint}교사에게 문의하세요.\n`,
         );
       }
     } else {
