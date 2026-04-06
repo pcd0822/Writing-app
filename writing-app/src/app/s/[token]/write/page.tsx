@@ -13,13 +13,13 @@ import {
   getOrCreateSubmission,
   isShareActive,
   loadTeacherDb,
+  mergeStudentViewFromRemote,
   resolveFeedbackNote,
-  updateSubmission,
-  saveTeacherDb,
+  updateSubmissionWithRemoteMerge,
 } from "@/lib/localDb";
-import type { Stage, TeacherDb } from "@/lib/types";
+import type { Stage } from "@/lib/types";
 import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/finalReport";
-import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+import { setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 
 type FeedbackPanelTab = "outline" | "draft" | "revise" | "final";
 
@@ -146,12 +146,12 @@ export default function WritePage() {
   useEffect(() => {
     if (!sid) return;
     setActiveSpreadsheetId(sid);
-    void pullDbFromSheet(sid)
-      .then((remote) => {
-        if (remote) saveTeacherDb(remote as TeacherDb);
-        setDbBump((v) => v + 1);
-      })
-      .catch(() => {});
+    const tick = () => {
+      void mergeStudentViewFromRemote().then(() => setDbBump((v) => v + 1));
+    };
+    tick();
+    const id = window.setInterval(tick, 10000);
+    return () => window.clearInterval(id);
   }, [sid]);
 
   const onResizeWidthStart = useCallback(
@@ -224,20 +224,31 @@ export default function WritePage() {
     if (!state.ok) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      if (stage === "outline") updateSubmission(state.submission.id, { outlineText: text });
-      else if (stage === "draft") updateSubmission(state.submission.id, { draftText: text });
-      else updateSubmission(state.submission.id, { reviseText: text });
-      bumpDb();
+      void (async () => {
+        if (!state.ok) return;
+        try {
+          if (stage === "outline") {
+            await updateSubmissionWithRemoteMerge(state.submission.id, { outlineText: text });
+          } else if (stage === "draft") {
+            await updateSubmissionWithRemoteMerge(state.submission.id, { draftText: text });
+          } else {
+            await updateSubmissionWithRemoteMerge(state.submission.id, { reviseText: text });
+          }
+          bumpDb();
+        } catch {
+          /* ignore */
+        }
+      })();
     }, 120);
   }
 
-  function flushSaveToDb() {
+  async function flushSaveToDb() {
     if (!state.ok) return;
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    updateSubmission(state.submission.id, {
+    await updateSubmissionWithRemoteMerge(state.submission.id, {
       outlineText,
       draftText,
       reviseText,
@@ -250,7 +261,7 @@ export default function WritePage() {
     setError(null);
     setIsSaving(true);
     try {
-      flushSaveToDb();
+      await flushSaveToDb();
     } finally {
       setIsSaving(false);
     }
@@ -339,12 +350,16 @@ export default function WritePage() {
       setError("내용을 작성한 뒤 제출해주세요.");
       return;
     }
-    flushSaveToDb();
+    await flushSaveToDb();
     setIsSubmitting(true);
     try {
-      if (stage === "outline") updateSubmission(state.submission.id, { outlineSubmittedAt: Date.now() });
-      else if (stage === "draft") updateSubmission(state.submission.id, { draftSubmittedAt: Date.now() });
-      else updateSubmission(state.submission.id, { reviseSubmittedAt: Date.now() });
+      if (stage === "outline") {
+        await updateSubmissionWithRemoteMerge(state.submission.id, { outlineSubmittedAt: Date.now() });
+      } else if (stage === "draft") {
+        await updateSubmissionWithRemoteMerge(state.submission.id, { draftSubmittedAt: Date.now() });
+      } else {
+        await updateSubmissionWithRemoteMerge(state.submission.id, { reviseSubmittedAt: Date.now() });
+      }
       setStageEditUnlocked((prev) => ({ ...prev, [stage]: false }));
       bumpDb();
       setShowSubmitSuccess(true);
@@ -429,7 +444,8 @@ export default function WritePage() {
     }
   }
 
-  function onResolveNote(noteId: string) {
+  async function onResolveNote(noteId: string) {
+    await mergeStudentViewFromRemote();
     resolveFeedbackNote(noteId);
     bumpDb();
   }

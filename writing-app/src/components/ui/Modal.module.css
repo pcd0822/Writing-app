@@ -9,7 +9,7 @@
 .overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(30, 58, 95, 0.25);
   backdrop-filter: blur(6px);
 }
 
@@ -18,15 +18,11 @@
   width: min(980px, calc(100vw - 28px));
   max-height: min(86vh, 860px);
   overflow: hidden;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(
-    180deg,
-    rgba(16, 18, 27, 0.96),
-    rgba(10, 12, 18, 0.96)
-  );
-  box-shadow: 0 30px 120px rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.92);
+  border-radius: 20px;
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(180deg, #ffffff 0%, #f0f9ff 100%);
+  box-shadow: 0 24px 80px rgba(59, 130, 246, 0.18);
+  color: #1e3a5f;
 }
 
 .lg {
@@ -43,7 +39,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 16px 16px 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(147, 197, 253, 0.4);
 }
 
 .title {
@@ -55,7 +51,7 @@
 .desc {
   margin-top: 6px;
   font-size: 13px;
-  opacity: 0.72;
+  opacity: 0.78;
   line-height: 1.55;
 }
 
@@ -63,9 +59,9 @@
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(180deg, #e0f2fe 0%, #dbeafe 100%);
+  color: #1e3a5f;
   cursor: pointer;
   transition: transform 120ms ease;
 }
@@ -82,6 +78,6 @@
 
 .footer {
   padding: 12px 16px 16px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(147, 197, 253, 0.4);
 }
 

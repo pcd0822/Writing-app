@@ -43,10 +43,10 @@ export function AiTutor({
 
   const header = useMemo(() => {
     return stage === "outline"
-      ? "AI 작문 튜터(개요)"
+      ? "🤖 AI 작문 튜터(개요)"
       : stage === "draft"
-        ? "AI 작문 튜터(초고)"
-        : "AI 작문 튜터(고쳐쓰기)";
+        ? "🤖 AI 작문 튜터(초고)"
+        : "🤖 AI 작문 튜터(고쳐쓰기)";
   }, [stage]);
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export function AiTutor({
 
     const studentMsg: Msg = { id: nanoid(10), role: "student", text: q };
     setMsgs((m) => [...m, studentMsg]);
-    addAiLog({
+    await addAiLog({
       id: nanoid(12),
       submissionId,
       stage,
@@ -102,7 +102,7 @@ export function AiTutor({
         text: assistantText,
       };
       setMsgs((m) => [...m, assistantMsg]);
-      addAiLog({
+      await addAiLog({
         id: nanoid(12),
         submissionId,
         stage,

@@ -1,11 +1,11 @@
 .page {
-  --bg: #0b0d12;
-  --panel: rgba(255, 255, 255, 0.06);
-  --border: rgba(255, 255, 255, 0.12);
-  --text: rgba(255, 255, 255, 0.92);
-  --muted: rgba(255, 255, 255, 0.66);
-  --accent: #7c3aed;
-  --accent-2: #22c55e;
+  --bg: #f5faff;
+  --panel: rgba(255, 255, 255, 0.92);
+  --border: rgba(147, 197, 253, 0.55);
+  --text: #1e3a5f;
+  --muted: rgba(30, 58, 95, 0.65);
+  --accent: #3182ce;
+  --accent-2: #38bdf8;
 
   display: flex;
   flex: 1;
@@ -14,9 +14,9 @@
   justify-content: center;
   font-family: var(--font-geist-sans);
   background:
-    radial-gradient(1000px 600px at 15% 20%, rgba(124, 58, 237, 0.35), transparent 60%),
-    radial-gradient(900px 520px at 80% 30%, rgba(34, 197, 94, 0.22), transparent 55%),
-    radial-gradient(800px 420px at 55% 85%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(1000px 600px at 15% 20%, rgba(147, 197, 253, 0.4), transparent 60%),
+    radial-gradient(900px 520px at 80% 30%, rgba(186, 230, 253, 0.45), transparent 55%),
+    radial-gradient(800px 420px at 55% 85%, rgba(191, 219, 254, 0.5), transparent 60%),
     var(--bg);
   color: var(--text);
 }
@@ -46,8 +46,8 @@
   letter-spacing: 0.12em;
   padding: 8px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(147, 197, 253, 0.65);
+  background: rgba(255, 255, 255, 0.85);
 }
 
 .titleBlock {
@@ -78,11 +78,11 @@
 
 .card {
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(240, 249, 255, 0.95));
   border-radius: 18px;
   padding: 18px;
   backdrop-filter: blur(10px);
-  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 16px 48px rgba(59, 130, 246, 0.1);
 }
 
 .card h2 {
@@ -99,11 +99,11 @@
 }
 
 .placeholder {
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  background: rgba(0, 0, 0, 0.18);
+  border: 1px dashed rgba(147, 197, 253, 0.65);
+  background: rgba(255, 255, 255, 0.7);
   border-radius: 14px;
   padding: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(30, 58, 95, 0.72);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -127,16 +127,17 @@
 }
 
 .primaryButton {
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.95), rgba(124, 58, 237, 0.65));
-  color: white;
-  box-shadow: 0 16px 44px rgba(124, 58, 237, 0.25);
+  background: linear-gradient(135deg, #93c5fd 0%, #7dd3fc 50%, #a5b4fc 100%);
+  color: #1e3a5f;
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 12px 36px rgba(59, 130, 246, 0.22);
 }
 
 .secondaryButton {
   margin-top: 10px;
-  background: rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.9);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, #fef9ff 0%, #f0f9ff 100%);
+  color: #1e3a5f;
+  border-color: rgba(147, 197, 253, 0.65);
 }
 
 .primaryButton:active,
@@ -161,8 +162,8 @@
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.25);
-  border-top-color: rgba(255, 255, 255, 0.9);
+  border: 2px solid rgba(30, 58, 95, 0.15);
+  border-top-color: rgba(30, 58, 95, 0.75);
   animation: spin 800ms linear infinite;
 }
 

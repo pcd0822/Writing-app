@@ -88,7 +88,7 @@ export default function TeacherPage() {
       <div className={styles.container}>
         <div className={styles.topbar}>
           <div>
-            <div className={styles.title}>교사 대시보드</div>
+            <div className={styles.title}>📚 교사 대시보드</div>
             <div className={styles.sub}>{displayName}</div>
           </div>
           <div className={styles.actions}>
@@ -97,7 +97,7 @@ export default function TeacherPage() {
               onClick={() => setIsSheetSetupOpen(true)}
               title="구글 스프레드시트(DB) 연결"
             >
-              {sheetId ? "DB 연결됨" : "DB 연결"}
+              {sheetId ? "📗 DB 연결됨" : "📎 DB 연결"}
             </button>
             <button className={styles.tinyButton} onClick={onSignOut} disabled={isSigningOut}>
               {isSigningOut ? "로그아웃 중…" : "로그아웃"}
@@ -109,13 +109,13 @@ export default function TeacherPage() {
           <div className={styles.row2}>
             <div className={styles.panel}>
               <div className={styles.panelHeader}>
-                <div className={styles.panelTitle}>학급 폴더</div>
+                <div className={styles.panelTitle}>🏫 학급 폴더</div>
                 <div className={styles.toolbarRow}>
                   <button
                     className={styles.tinyButton}
                     onClick={() => setIsCreateClassOpen(true)}
                   >
-                    학급 생성하기
+                    ✨ 학급 생성하기
                   </button>
                 </div>
               </div>
@@ -149,7 +149,7 @@ export default function TeacherPage() {
 
             <div className={styles.panel}>
               <div className={styles.panelHeader}>
-                <div className={styles.panelTitle}>과제</div>
+                <div className={styles.panelTitle}>📝 과제</div>
                 <div className={styles.toolbarRow}>
                   <button
                     className={styles.tinyButton}
@@ -157,7 +157,7 @@ export default function TeacherPage() {
                     disabled={db.classes.length === 0}
                     title={db.classes.length === 0 ? "학급을 먼저 생성해주세요." : undefined}
                   >
-                    과제 생성하기
+                    🎀 과제 생성하기
                   </button>
                 </div>
               </div>
@@ -183,7 +183,7 @@ export default function TeacherPage() {
                           onClick={() => setShareAssignmentId(a.id)}
                           title="공유 링크 생성/관리"
                         >
-                          공유
+                          🔗 공유
                         </button>
                         <button
                           type="button"
@@ -191,7 +191,7 @@ export default function TeacherPage() {
                           onClick={() => setEditAssignmentId(a.id)}
                           title="과제 내용 수정"
                         >
-                          과제 수정
+                          ✏️ 과제 수정
                         </button>
                         <button
                           type="button"
@@ -199,7 +199,7 @@ export default function TeacherPage() {
                           onClick={() => router.push(`/teacher/assignments/${a.id}`)}
                           title="과제 대시보드"
                         >
-                          대시보드 보기
+                          📊 대시보드 보기
                         </button>
                       </div>
                     </div>

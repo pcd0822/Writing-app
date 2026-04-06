@@ -12,7 +12,7 @@ import {
   type Score,
   type TeacherDb,
 } from "./types";
-import { getActiveSpreadsheetId, pushDbToSheet } from "./spreadsheetSync";
+import { getActiveSpreadsheetId, pullDbFromSheet, pushDbToSheet } from "./spreadsheetSync";
 
 const KEY = "writing-app:teacherDb:v1";
 
@@ -289,6 +289,78 @@ export function updateSubmission(
   return updated;
 }
 
+/**
+ * 학생 기기 로컬 DB와 시트(교사) DB를 병합합니다.
+ * - 클래스/과제/배당/공유는 remote(시트) 기준
+ * - 제출 글 본문·제출 시각은 local(학생) 우선
+ * - 승인·최종리포트·점수·피드백 메모·AI 로그는 remote와 local을 id 기준으로 합침
+ */
+export function mergeTeacherDbForStudentView(local: TeacherDb, remote: TeacherDb): TeacherDb {
+  const localById = new Map(local.submissions.map((s) => [s.id, s]));
+  const remoteSubIds = new Set(remote.submissions.map((s) => s.id));
+
+  const mergedSubmissions: Submission[] = remote.submissions.map((rs) => {
+    const ls = localById.get(rs.id);
+    if (!ls) return rs;
+    return {
+      ...rs,
+      outlineText: ls.outlineText,
+      draftText: ls.draftText,
+      reviseText: ls.reviseText,
+      outlineSubmittedAt: ls.outlineSubmittedAt ?? rs.outlineSubmittedAt,
+      draftSubmittedAt: ls.draftSubmittedAt ?? rs.draftSubmittedAt,
+      reviseSubmittedAt: ls.reviseSubmittedAt ?? rs.reviseSubmittedAt,
+      updatedAt: Math.max(ls.updatedAt, rs.updatedAt),
+    };
+  });
+  for (const ls of local.submissions) {
+    if (!remoteSubIds.has(ls.id)) mergedSubmissions.push(ls);
+  }
+
+  const noteMap = new Map(local.feedbackNotes.map((n) => [n.id, n]));
+  for (const n of remote.feedbackNotes) noteMap.set(n.id, n);
+  const feedbackNotes = [...noteMap.values()].sort((a, b) => a.createdAt - b.createdAt);
+
+  const scoreMap = new Map(local.scores.map((s) => [s.submissionId, s]));
+  for (const s of remote.scores) scoreMap.set(s.submissionId, s);
+  const scores = [...scoreMap.values()];
+
+  const logMap = new Map(local.aiLogs.map((l) => [l.id, l]));
+  for (const l of remote.aiLogs) logMap.set(l.id, l);
+  const aiLogs = [...logMap.values()].sort((a, b) => b.createdAt - a.createdAt);
+
+  return {
+    ...remote,
+    submissions: mergedSubmissions,
+    feedbackNotes,
+    scores,
+    aiLogs,
+  };
+}
+
+/** 시트에서 최신 DB를 가져와 학생 화면 기준으로 병합 후 저장 */
+export async function mergeStudentViewFromRemote(): Promise<void> {
+  const sid = getActiveSpreadsheetId();
+  if (!sid) return;
+  try {
+    const remote = await pullDbFromSheet(sid);
+    if (!remote) return;
+    const merged = mergeTeacherDbForStudentView(loadTeacherDb(), remote as TeacherDb);
+    saveTeacherDb(merged);
+  } catch {
+    /* 네트워크 실패 시 로컬 유지 */
+  }
+}
+
+/** 저장 전 원격과 병합해 교사 승인 등이 로컬 저장으로 덮어씌워지지 않게 함 */
+export async function updateSubmissionWithRemoteMerge(
+  submissionId: string,
+  patch: Partial<Submission>,
+): Promise<Submission> {
+  await mergeStudentViewFromRemote();
+  return updateSubmission(submissionId, patch);
+}
+
 export function createFeedbackNoteId() {
   return nanoid(12);
 }
@@ -312,7 +384,8 @@ export function resolveFeedbackNote(noteId: string) {
   saveTeacherDb(next);
 }
 
-export function addAiLog(log: AiLog) {
+export async function addAiLog(log: AiLog) {
+  await mergeStudentViewFromRemote();
   const db = loadTeacherDb();
   saveTeacherDb({ ...db, aiLogs: [log, ...db.aiLogs] });
 }

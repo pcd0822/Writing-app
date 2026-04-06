@@ -2,11 +2,14 @@
   min-height: 100vh;
   padding: 24px;
   font-family: var(--font-geist-sans);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   background:
-    radial-gradient(1000px 600px at 15% 20%, rgba(124, 58, 237, 0.25), transparent 60%),
-    radial-gradient(900px 520px at 80% 30%, rgba(34, 197, 94, 0.15), transparent 55%),
-    #0b0d12;
-  color: rgba(255, 255, 255, 0.92);
+    radial-gradient(900px 500px at 50% 0%, rgba(147, 197, 253, 0.35), transparent 55%),
+    radial-gradient(700px 400px at 100% 80%, rgba(186, 230, 253, 0.5), transparent 50%),
+    linear-gradient(180deg, #f8fcff 0%, #ffffff 40%, #f0f9ff 100%);
+  color: #1e3a5f;
 }
 
 .topbar {
@@ -15,6 +18,7 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+  width: 100%;
 }
 
 .title {
@@ -26,7 +30,7 @@
 .sub {
   margin-top: 6px;
   font-size: 13px;
-  opacity: 0.75;
+  opacity: 0.78;
 }
 
 .actions {
@@ -36,7 +40,9 @@
 }
 
 .container {
+  width: 100%;
   max-width: 1120px;
+  margin: 0 auto;
 }
 
 .grid {
@@ -44,21 +50,23 @@
   grid-template-columns: 1fr;
   gap: 12px;
   margin-top: 12px;
+  width: 100%;
 }
 
 .row2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 16px;
+  width: 100%;
+  align-items: start;
 }
 
 .panel {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
-  border-radius: 18px;
-  padding: 14px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(240, 249, 255, 0.88));
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.1);
 }
 
 .panelHeader {
@@ -85,44 +93,52 @@
 
 .classes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  justify-items: stretch;
 }
 
 .assignmentCard {
   text-align: left;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.22);
-  padding: 12px;
-  color: rgba(255, 255, 255, 0.92);
+  border-radius: 18px;
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(165deg, #ffffff 0%, #f0f9ff 100%);
+  padding: 16px 16px 14px;
+  min-height: 148px;
+  color: #1e3a5f;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  box-shadow: 0 8px 28px rgba(59, 130, 246, 0.08);
 }
 
 .assignmentCardActions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 8px;
   align-items: center;
+  margin-top: auto;
 }
 
 .cardMiniBtn {
-  height: 30px;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
   padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(180deg, #e0f2fe 0%, #dbeafe 100%);
+  color: #1e3a5f;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 120ms ease, border-color 120ms ease;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  white-space: nowrap;
 }
 
 .cardMiniBtn:hover {
-  border-color: rgba(124, 58, 237, 0.35);
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
 }
 
 .cardMiniBtn:active {
@@ -131,13 +147,14 @@
 
 .classCard {
   text-align: left;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.22);
-  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(165deg, #ffffff 0%, #f0f9ff 100%);
+  padding: 14px;
   cursor: pointer;
-  transition: transform 120ms ease, border-color 120ms ease;
-  color: rgba(255, 255, 255, 0.92);
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  color: #1e3a5f;
+  box-shadow: 0 6px 22px rgba(59, 130, 246, 0.07);
 }
 
 .classCard:active {
@@ -145,7 +162,8 @@
 }
 
 .classCard:hover {
-  border-color: rgba(124, 58, 237, 0.35);
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 8px 26px rgba(59, 130, 246, 0.12);
 }
 
 .className {
@@ -166,9 +184,9 @@
 .empty {
   padding: 14px;
   border-radius: 16px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  background: rgba(0, 0, 0, 0.18);
-  opacity: 0.8;
+  border: 1px dashed rgba(147, 197, 253, 0.65);
+  background: rgba(255, 255, 255, 0.65);
+  opacity: 0.9;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -181,8 +199,8 @@
 
 .studentRow {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(147, 197, 253, 0.45);
+  background: rgba(255, 255, 255, 0.85);
   padding: 10px 12px;
   display: flex;
   align-items: center;
@@ -200,8 +218,8 @@
   font-size: 13px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(180deg, #fef9ff 0%, #f0f9ff 100%);
 }
 
 .toolbarRow {
@@ -213,17 +231,22 @@
 
 .tinyButton {
   height: 36px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  background: linear-gradient(180deg, #e0f2fe 0%, #dbeafe 100%);
+  color: #1e3a5f;
+  font-weight: 650;
   cursor: pointer;
-  transition: transform 120ms ease;
+  transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 .tinyButton:active {
   transform: translateY(1px) scale(0.99);
+}
+
+.tinyButton:hover {
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.15);
 }
 
 @media (max-width: 900px) {
@@ -237,4 +260,3 @@
     grid-template-columns: 1fr;
   }
 }
-
