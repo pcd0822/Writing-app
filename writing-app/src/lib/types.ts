@@ -129,6 +129,8 @@ export type Score = z.infer<typeof ScoreSchema>;
 
 export const TeacherDbSchema = z.object({
   version: z.literal(4),
+  /** 구글 시트 v2 분산 저장 시 메타에만 사용 (클라이언트 로직에서는 무시 가능) */
+  sheetDbVersion: z.number().optional(),
   classes: z.array(ClassSchema),
   assignments: z.array(AssignmentSchema),
   allocations: z.array(AssignmentAllocationSchema),

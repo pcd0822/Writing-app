@@ -1,6 +1,7 @@
 import type { Handler } from "@netlify/functions";
 import { z } from "zod";
-import { ensureWorkbookStructure, getSheetsClient } from "./_sheets";
+import { ensureWorkbookStructure } from "./_sheets";
+import { readTeacherDbFromSpreadsheet } from "./_sheetDbReadWrite";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -17,17 +18,9 @@ export const handler: Handler = async (event) => {
   try {
     const spreadsheetId = parsed.data.spreadsheetId;
     await ensureWorkbookStructure(spreadsheetId);
-    const sheets = getSheetsClient();
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: "meta!A1",
-    });
-    const cell = res.data.values?.[0]?.[0] as string | undefined;
-    if (!cell) return json(200, { db: null });
-    const db = JSON.parse(cell);
+    const db = await readTeacherDbFromSpreadsheet(spreadsheetId);
     return json(200, { db });
   } catch (e) {
     return json(500, { error: (e as Error).message || "db-get failed" });
   }
 };
-
