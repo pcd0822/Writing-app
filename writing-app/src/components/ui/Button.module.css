@@ -1,41 +1,61 @@
 .button {
   width: 100%;
   height: 44px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid transparent;
   cursor: pointer;
   font-weight: 650;
   transition:
-    transform 120ms ease,
-    box-shadow 120ms ease,
-    background 120ms ease,
-    border-color 120ms ease,
-    opacity 120ms ease;
+    transform 0.08s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
   user-select: none;
-  will-change: transform;
 }
 
-.button:active {
-  transform: translateY(1px) scale(0.99);
+.button:active:not(:disabled) {
+  transform: translateY(2px) scale(0.98);
 }
 
 .button:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 .primary {
-  background: linear-gradient(135deg, #93c5fd 0%, #7dd3fc 50%, #a5b4fc 100%);
-  color: #1e3a5f;
-  border-color: rgba(59, 130, 246, 0.35);
-  box-shadow: 0 10px 28px rgba(59, 130, 246, 0.22);
+  background: #7dd3fc;
+  color: #0c4a6e;
+  border-color: #38bdf8;
+  box-shadow: 0 1px 0 rgba(14, 116, 144, 0.25);
+}
+
+.primary:hover:not(:disabled):not([data-loading="true"]) {
+  background: #38bdf8;
+  color: #0c2d48;
+}
+
+.primary:active:not(:disabled) {
+  background: #0ea5e9;
+  border-color: #0284c7;
+  box-shadow: inset 0 2px 4px rgba(12, 74, 110, 0.2);
 }
 
 .secondary {
-  background: linear-gradient(180deg, #fef9ff 0%, #f0f9ff 100%);
-  color: #1e3a5f;
-  border-color: rgba(147, 197, 253, 0.65);
-  box-shadow: 0 4px 14px rgba(147, 197, 253, 0.2);
+  background: #ffffff;
+  color: #0c4a6e;
+  border-color: #93c5fd;
+  box-shadow: 0 1px 0 rgba(148, 163, 184, 0.25);
+}
+
+.secondary:hover:not(:disabled):not([data-loading="true"]) {
+  background: #f0f9ff;
+  border-color: #60a5fa;
+}
+
+.secondary:active:not(:disabled) {
+  background: #e0f2fe;
+  border-color: #3b82f6;
 }
 
 .inline {
@@ -49,9 +69,10 @@
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  border: 2px solid rgba(30, 58, 95, 0.2);
-  border-top-color: rgba(30, 58, 95, 0.75);
-  animation: spin 800ms linear infinite;
+  border: 2px solid rgba(12, 74, 110, 0.25);
+  border-top-color: #0c4a6e;
+  animation: spin 700ms linear infinite;
+  flex-shrink: 0;
 }
 
 @keyframes spin {

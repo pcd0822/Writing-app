@@ -4,27 +4,29 @@
   display: flex;
   flex-direction: column;
   border-radius: 16px;
-  border: 1px solid rgba(147, 197, 253, 0.45);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(240, 249, 255, 0.92));
-  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.08);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
   overflow: hidden;
-  color: #1e3a5f;
+  color: #0f172a;
 }
 
 .head {
   padding: 12px 12px 10px 12px;
-  border-bottom: 1px solid rgba(147, 197, 253, 0.4);
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
 }
 
 .title {
   font-weight: 850;
   letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .sub {
   margin-top: 6px;
   font-size: 12px;
-  opacity: 0.75;
+  color: #475569;
   line-height: 1.45;
 }
 
@@ -36,16 +38,17 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  background: #ffffff;
 }
 
 .empty {
   font-size: 13px;
-  opacity: 0.78;
+  color: #64748b;
   line-height: 1.5;
-  border: 1px dashed rgba(147, 197, 253, 0.55);
+  border: 1px dashed #cbd5e1;
   border-radius: 14px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.75);
+  background: #f8fafc;
 }
 
 .me,
@@ -65,28 +68,32 @@
   max-width: 92%;
   padding: 10px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(147, 197, 253, 0.45);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
+  color: #0f172a;
 }
 
 .me .bubble {
-  border-color: rgba(147, 197, 253, 0.65);
-  background: linear-gradient(165deg, #e0f2fe 0%, #dbeafe 100%);
+  border-color: #7dd3fc;
+  background: #e0f2fe;
+  color: #0c4a6e;
 }
 
 .ai .bubble {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
+  border-color: #e2e8f0;
 }
 
 .inputRow {
   padding: 10px;
-  border-top: 1px solid rgba(147, 197, 253, 0.35);
+  border-top: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  background: #ffffff;
 }
 
 .input {
@@ -94,9 +101,9 @@
   min-height: 72px;
   resize: vertical;
   border-radius: 12px;
-  border: 1px solid rgba(147, 197, 253, 0.55);
-  background: rgba(255, 255, 255, 0.95);
-  color: #1e3a5f;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
   padding: 10px 12px;
   font-size: 13px;
   outline: none;
@@ -104,13 +111,13 @@
 }
 
 .input:focus {
-  border-color: rgba(59, 130, 246, 0.5);
-  box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.3);
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
 }
 
 .error {
   padding: 0 10px 8px;
   font-size: 12px;
-  color: #c53030;
+  color: #b91c1c;
   line-height: 1.45;
 }

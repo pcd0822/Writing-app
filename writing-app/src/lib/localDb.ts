@@ -179,7 +179,7 @@ export function createShareToken() {
 
 export function createShareLink(
   db: TeacherDb,
-  input: { assignmentId: string; expiresAt: number },
+  input: { assignmentId: string; expiresAt: number; spreadsheetId?: string },
 ): { db: TeacherDb; share: ShareLink } {
   const share: ShareLink = {
     token: createShareToken(),
@@ -187,6 +187,7 @@ export function createShareLink(
     createdAt: Date.now(),
     expiresAt: input.expiresAt,
     revokedAt: null,
+    ...(input.spreadsheetId ? { spreadsheetId: input.spreadsheetId } : {}),
   };
   return { db: { ...db, shares: [share, ...db.shares] }, share };
 }

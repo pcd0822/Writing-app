@@ -80,6 +80,7 @@ export function ShareAssignmentModal({
       const { db: next } = createShareLink(db0, {
         assignmentId,
         expiresAt: minutesFromNow(m),
+        spreadsheetId: sid,
       });
       saveTeacherDb(next);
       setLocalVer((v) => v + 1); // 모달 내 즉시 갱신

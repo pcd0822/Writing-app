@@ -107,6 +107,12 @@ export default function WritePage() {
     }
   }, [token, studentNo, dbBump]);
 
+  /** URL의 sid 또는 공유 링크에 저장된 스프레드시트 ID(교사 DB 연결 시) */
+  const effectiveSheetId =
+    sid.trim() ||
+    (state.ok && state.share.spreadsheetId ? state.share.spreadsheetId.trim() : "") ||
+    "";
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -144,15 +150,15 @@ export default function WritePage() {
   }, [tutorHeight]);
 
   useEffect(() => {
-    if (!sid) return;
-    setActiveSpreadsheetId(sid);
+    if (!effectiveSheetId) return;
+    setActiveSpreadsheetId(effectiveSheetId);
     const tick = () => {
       void mergeStudentViewFromRemote().then(() => setDbBump((v) => v + 1));
     };
     tick();
     const id = window.setInterval(tick, 10000);
     return () => window.clearInterval(id);
-  }, [sid]);
+  }, [effectiveSheetId]);
 
   const onResizeWidthStart = useCallback(
     (e: React.MouseEvent) => {

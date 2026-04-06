@@ -58,6 +58,8 @@ export const ShareLinkSchema = z.object({
   createdAt: z.number().int(),
   expiresAt: z.number().int(),
   revokedAt: z.number().int().nullable().default(null),
+  /** DB 연결 시 생성·동기화되며, 학생이 sid 없이 접속해도 시트 푸시에 사용 */
+  spreadsheetId: z.string().optional(),
 });
 export type ShareLink = z.infer<typeof ShareLinkSchema>;
 

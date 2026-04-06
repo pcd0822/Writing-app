@@ -45,16 +45,7 @@ export default function ShareLandingPage() {
 
     setIsVerifying(true);
     try {
-      // 스프레드시트 완전 이관: 공유 링크에 sid가 있으면, 시트에서 최신 DB를 pull
-      const sid = new URLSearchParams(window.location.search).get("sid");
-      if (sid) {
-        setActiveSpreadsheetId(sid);
-        const remote = await pullDbFromSheet(sid);
-        if (remote) {
-          // local storage에 덮어써서 이후 흐름이 동일하게 동작하도록
-          saveTeacherDb(remote as TeacherDb);
-        }
-      }
+      const sidFromUrl = new URLSearchParams(window.location.search).get("sid");
 
       const latestState = (() => {
         try {
@@ -75,7 +66,36 @@ export default function ShareLandingPage() {
         return;
       }
 
-      const { db, allocation } = latestState;
+      const { share } = latestState;
+      const effectiveSid = sidFromUrl || share.spreadsheetId || null;
+      if (effectiveSid) {
+        setActiveSpreadsheetId(effectiveSid);
+        const remote = await pullDbFromSheet(effectiveSid);
+        if (remote) {
+          saveTeacherDb(remote as TeacherDb);
+        }
+      }
+
+      const latestState2 = (() => {
+        try {
+          const db = loadTeacherDb();
+          const sh = token ? findShare(db, token) : null;
+          if (!sh || !isShareActive(sh)) return null;
+          const assignment = db.assignments.find((a) => a.id === sh.assignmentId) || null;
+          const allocation =
+            db.allocations.find((x) => x.assignmentId === sh.assignmentId) || null;
+          return { db, share: sh, assignment, allocation };
+        } catch {
+          return null;
+        }
+      })();
+
+      if (!latestState2) {
+        setError("공유 링크가 유효하지 않습니다.");
+        return;
+      }
+
+      const { db, allocation } = latestState2;
       const cls = db.classes.find((c) => c.students.some((s) => s.studentNo === no)) || null;
       const student =
         cls?.students.find((s) => s.studentNo === no && s.studentCode === code) || null;
@@ -99,7 +119,8 @@ export default function ShareLandingPage() {
       }
 
       // 다음 단계에서 실제 작문 화면(/write/...)로 이동하도록 연결
-      const sidQ = sid ? `&sid=${encodeURIComponent(sid)}` : "";
+      const sidForWrite = sidFromUrl || latestState2.share.spreadsheetId || "";
+      const sidQ = sidForWrite ? `&sid=${encodeURIComponent(sidForWrite)}` : "";
       router.push(`/s/${token}/write?studentNo=${encodeURIComponent(no)}${sidQ}`);
     } finally {
       setIsVerifying(false);

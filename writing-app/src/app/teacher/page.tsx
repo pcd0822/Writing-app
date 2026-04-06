@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "../providers";
 import { signOutCurrentUser } from "@/lib/auth";
 import { CreateClassModal } from "@/components/teacher/CreateClassModal";
-import { loadTeacherDb } from "@/lib/localDb";
+import { loadTeacherDb, saveTeacherDb } from "@/lib/localDb";
 import styles from "./teacher.module.css";
 import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModal";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
@@ -29,6 +29,30 @@ export default function TeacherPage() {
   useEffect(() => {
     if (!isLoading && !user) router.replace("/");
   }, [isLoading, user, router]);
+
+  /** 기존 공유 링크에 스프레드시트 ID가 없으면 현재 DB 연결 ID로 채워 학생 측 시트 동기화가 되도록 함 */
+  useEffect(() => {
+    if (typeof window === "undefined" || !user) return;
+    try {
+      const sid = loadTeacherSettings()?.spreadsheetId;
+      if (!sid) return;
+      const db = loadTeacherDb();
+      let changed = false;
+      const shares = db.shares.map((s) => {
+        if (s.revokedAt == null && !s.spreadsheetId) {
+          changed = true;
+          return { ...s, spreadsheetId: sid };
+        }
+        return s;
+      });
+      if (changed) {
+        saveTeacherDb({ ...db, shares });
+        setDbVersion((v) => v + 1);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [user]);
 
   const displayName = useMemo(() => {
     if (!user) return "";

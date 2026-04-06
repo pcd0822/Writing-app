@@ -21,6 +21,7 @@ export function Button({
     <button
       {...rest}
       disabled={isDisabled}
+      data-loading={isLoading ? "true" : undefined}
       className={[
         styles.button,
         variant === "primary" ? styles.primary : styles.secondary,
