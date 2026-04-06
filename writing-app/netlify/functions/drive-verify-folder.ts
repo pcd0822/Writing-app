@@ -1,5 +1,7 @@
 import type { Handler } from "@netlify/functions";
+import { Readable } from "node:stream";
 import { z } from "zod";
+import { quotaHintFromGoogleError } from "./_driveQuotaMessage";
 import { getDriveClient } from "./_googleAuth";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
@@ -8,9 +10,7 @@ const BodySchema = z.object({
 });
 
 /**
- * 교사가 소유·공유한 폴더인지 확인합니다.
- * 서비스 계정은 자체 저장 용량이 없으므로, 반드시 이 폴더를 교사 드라이브에서 만들고
- * 서비스 계정 이메일을 편집자로 공유해야 합니다.
+ * 교사가 소유·공유한 폴더인지 확인하고, 서비스 계정으로 실제 파일 생성이 되는지 검사합니다.
  */
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return handleOptions();
@@ -43,6 +43,41 @@ export const handler: Handler = async (event) => {
         error:
           "이 폴더에 편집할 수 없습니다. 서비스 계정 이메일을 폴더에 ‘편집자’로 공유했는지 확인하세요.",
       });
+    }
+
+    const probeName = `.writing-app-write-test-${Date.now()}.txt`;
+    let probeId: string | null = null;
+    try {
+      const probe = await drive.files.create(
+        {
+          requestBody: {
+            name: probeName,
+            parents: [folderId],
+          },
+          media: {
+            mimeType: "text/plain",
+            body: Readable.from(Buffer.from("ok", "utf8")),
+          },
+          fields: "id",
+          supportsAllDrives: true,
+        },
+      );
+      probeId = probe.data.id || null;
+    } catch (writeErr) {
+      const raw = String((writeErr as Error).message || writeErr);
+      return json(403, {
+        error:
+          `이 폴더에 파일을 만들 수 없습니다. ${raw.slice(0, 200)}` +
+          quotaHintFromGoogleError(raw),
+      });
+    }
+
+    if (probeId) {
+      try {
+        await drive.files.delete({ fileId: probeId, supportsAllDrives: true });
+      } catch {
+        /* 삭제 실패는 무시 — 테스트 파일이 남을 수 있음 */
+      }
     }
 
     return json(200, {

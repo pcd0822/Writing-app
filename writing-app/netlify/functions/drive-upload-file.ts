@@ -1,8 +1,9 @@
 import type { Handler } from "@netlify/functions";
 import { Readable } from "node:stream";
 import { z } from "zod";
+import { driveStorageFileName } from "./_driveUploadNames";
+import { quotaHintFromGoogleError } from "./_driveQuotaMessage";
 import { getDriveClient } from "./_googleAuth";
-import { ensureAssignmentFolder } from "./_driveFolder";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -32,12 +33,12 @@ export const handler: Handler = async (event) => {
     }
 
     const drive = getDriveClient();
-    const assignmentFolderId = await ensureAssignmentFolder(drive, driveRootFolderId, assignmentId);
+    const storageName = driveStorageFileName(assignmentId, fileName);
 
     const created = await drive.files.create({
       requestBody: {
-        name: fileName,
-        parents: [assignmentFolderId],
+        name: storageName,
+        parents: [driveRootFolderId],
       },
       media: {
         mimeType: mimeType || "application/octet-stream",
@@ -72,6 +73,7 @@ export const handler: Handler = async (event) => {
       },
     });
   } catch (e) {
-    return json(500, { error: (e as Error).message || "drive-upload-file failed" });
+    const msg = (e as Error).message || "drive-upload-file failed";
+    return json(500, { error: msg + quotaHintFromGoogleError(msg) });
   }
 };

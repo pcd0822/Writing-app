@@ -1,7 +1,8 @@
 import type { Handler } from "@netlify/functions";
 import { z } from "zod";
-import { getDriveClient, getGoogleAccessToken } from "./_googleAuth";
-import { ensureAssignmentFolder } from "./_driveFolder";
+import { driveStorageFileName } from "./_driveUploadNames";
+import { quotaHintFromGoogleError } from "./_driveQuotaMessage";
+import { getGoogleAccessToken } from "./_googleAuth";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 
 const BodySchema = z.object({
@@ -27,11 +28,9 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const drive = getDriveClient();
-    const assignmentFolderId = await ensureAssignmentFolder(drive, driveRootFolderId, assignmentId);
-
     const token = await getGoogleAccessToken();
     const mime = mimeType || "application/octet-stream";
+    const storageName = driveStorageFileName(assignmentId, fileName);
 
     const initRes = await fetch(
       "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,name,mimeType,size",
@@ -44,15 +43,18 @@ export const handler: Handler = async (event) => {
           "X-Upload-Content-Type": mime,
         },
         body: JSON.stringify({
-          name: fileName,
-          parents: [assignmentFolderId],
+          name: storageName,
+          parents: [driveRootFolderId],
         }),
       },
     );
 
     if (!initRes.ok) {
       const errText = await initRes.text();
-      return json(502, { error: `드라이브 업로드 세션 실패: ${initRes.status} ${errText.slice(0, 400)}` });
+      const hint = quotaHintFromGoogleError(errText);
+      return json(502, {
+        error: `드라이브 업로드 세션 실패: ${initRes.status} ${errText.slice(0, 400)}${hint}`,
+      });
     }
 
     const sessionUrl =

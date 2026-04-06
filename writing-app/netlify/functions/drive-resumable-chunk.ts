@@ -94,7 +94,7 @@ export const handler: Handler = async (event) => {
       ok: true as const,
       done: true as const,
       attachment: {
-        name: fileJson.name || fileName,
+        name: fileName,
         type: mimeType || fileJson.mimeType || undefined,
         size: Number(fileJson.size || totalSize),
         driveFileId: fileId,
