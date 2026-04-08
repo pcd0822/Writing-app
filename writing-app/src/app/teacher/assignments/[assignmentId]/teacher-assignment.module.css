@@ -154,14 +154,41 @@
   height: 36px;
   padding: 0 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
   cursor: pointer;
   transition: transform 120ms ease;
 }
 .smallBtn:active {
   transform: translateY(1px) scale(0.99);
+}
+
+.smallBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.approveBtn {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #38bdf8;
+  background: #7dd3fc;
+  color: #0c4a6e;
+  font-weight: 850;
+  cursor: pointer;
+  transition: transform 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+
+.approveBtn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+  background: #38bdf8;
+}
+
+.approveBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .textarea {
@@ -188,8 +215,9 @@
 
 .selectBox {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   padding: 12px;
   font-size: 13px;
   max-height: 260px;
@@ -205,8 +233,9 @@
 }
 .noteItem {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   padding: 10px 12px;
 }
 .quote {
@@ -226,8 +255,9 @@
 
 .log {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   padding: 10px 12px;
   max-height: 240px;
   overflow: auto;
@@ -339,10 +369,11 @@
 
 .feedbackDropZone {
   margin-top: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border: 1px dashed #cbd5e1;
   border-radius: 14px;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .dropHint {
@@ -371,7 +402,7 @@
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
-  color: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
 }
 
 .finalPanel {

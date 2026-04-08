@@ -383,16 +383,26 @@ export default function TeacherAssignmentPage() {
                   <div className={styles.block}>
                     <div className={styles.blockTitle}>
                       현재 단계: {stageText(currentStage(selected.sub))}
-                      {dashTab === currentStage(selected.sub) ? (
-                        <button
-                          type="button"
-                          className={styles.smallBtn}
-                          style={{ marginLeft: 10 }}
-                          onClick={() => approveStage(selected.sub.id, currentStage(selected.sub))}
-                        >
-                          승인하기
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.approveBtn}
+                        style={{ marginLeft: 10 }}
+                        disabled={dashTab !== currentStage(selected.sub)}
+                        onClick={() => approveStage(selected.sub.id, currentStage(selected.sub))}
+                        title={
+                          dashTab !== currentStage(selected.sub)
+                            ? "현재 단계에서만 승인할 수 있습니다."
+                            : dashTab === "revise"
+                              ? "최종 승인(고쳐쓰기 승인)"
+                              : "승인"
+                        }
+                      >
+                        {dashTab === "outline"
+                          ? "개요 승인"
+                          : dashTab === "draft"
+                            ? "초고 승인"
+                            : "최종 승인"}
+                      </button>
                     </div>
                   </div>
 
