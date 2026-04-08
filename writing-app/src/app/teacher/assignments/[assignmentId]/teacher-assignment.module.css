@@ -418,8 +418,9 @@
 
 .infoCard {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   padding: 12px;
 }
 
@@ -447,7 +448,7 @@
 .barTrack {
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #e2e8f0;
   overflow: hidden;
 }
 
@@ -496,15 +497,16 @@
   margin: 12px 0;
   padding: 12px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .narrativeText {
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
-  opacity: 0.88;
+  opacity: 0.92;
 }
 
 .publishedBadge {

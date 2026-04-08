@@ -170,6 +170,22 @@ export default function TeacherAssignmentPage() {
     bump();
   }
 
+  function cancelFinalApproval(subId: string) {
+    setError(null);
+    const db = loadTeacherDb();
+    const sub = db.submissions.find((s) => s.id === subId);
+    if (!sub) return;
+    if (!sub.finalApprovedAt) return;
+    // 최종 승인/배포 상태를 되돌려, 학생이 다시 고쳐쓰기 단계로 작업할 수 있게 함
+    updateSubmission(subId, {
+      reviseApprovedAt: null,
+      finalApprovedAt: null,
+      finalReportPublishedAt: null,
+      finalReportSnapshot: "",
+    });
+    bump();
+  }
+
   function addNote() {
     setError(null);
     if (!selected || dashTab === "final") return;
@@ -403,6 +419,16 @@ export default function TeacherAssignmentPage() {
                             ? "초고 승인"
                             : "최종 승인"}
                       </button>
+                      {dashTab === "revise" && selected.sub.finalApprovedAt ? (
+                        <button
+                          type="button"
+                          className={styles.smallBtn}
+                          onClick={() => cancelFinalApproval(selected.sub.id)}
+                          title="최종 승인을 취소하고, 학생이 다시 고쳐쓰기를 진행할 수 있게 합니다."
+                        >
+                          승인 취소
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
