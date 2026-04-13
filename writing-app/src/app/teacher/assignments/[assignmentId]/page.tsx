@@ -25,6 +25,9 @@ import type {
 } from "@/lib/types";
 import { buildFinalReportSnapshot } from "@/lib/finalReport";
 import { GraspSummary } from "@/components/student/GraspSummary";
+import { StudentDashboard } from "@/components/student/StudentDashboard";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
 
 const FEEDBACK_TEMPLATES = [
   "개요에서 세운 논점이 초고에서 어떻게 구체화되었는지 확인해보세요.",
@@ -76,6 +79,7 @@ export default function TeacherAssignmentPage() {
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectStage, setRejectStage] = useState<Stage>("outline");
+  const [showStudentDashboard, setShowStudentDashboard] = useState(false);
 
   // 실시간 모니터링 자동 새로고침
   useEffect(() => {
@@ -431,6 +435,28 @@ export default function TeacherAssignmentPage() {
         </div>
       ) : null}
 
+      {/* 학생 사고 성장 대시보드 모달 */}
+      {selected ? (
+        <Modal
+          isOpen={showStudentDashboard}
+          onClose={() => setShowStudentDashboard(false)}
+          title={`사고 성장 대시보드 — 학생 ${selected.sub.studentNo}`}
+          size="xl"
+          footer={
+            <Button variant="secondary" onClick={() => setShowStudentDashboard(false)}>
+              닫기
+            </Button>
+          }
+        >
+          <StudentDashboard
+            submission={selected.sub}
+            transitions={selected.transitions}
+            aiInteractions={selected.aiInteractions}
+            grasp={selected.grasp}
+          />
+        </Modal>
+      ) : null}
+
       <div className={styles.top}>
         <button className={styles.back} onClick={() => router.push("/teacher")}>
           ← 교사 화면
@@ -477,7 +503,16 @@ export default function TeacherAssignmentPage() {
 
         {/* ── 우측: 학생 대시보드 ── */}
         <div className={styles.panel}>
-          <div className={styles.panelTitle}>학생 대시보드</div>
+          <div className={styles.panelTitle} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>학생 대시보드</span>
+            {selected ? (
+              <button type="button" className={styles.smallBtn}
+                style={{ fontSize: 11 }}
+                onClick={() => setShowStudentDashboard(true)}>
+                사고 성장 대시보드
+              </button>
+            ) : null}
+          </div>
           {!selected ? (
             <div className={styles.empty}>왼쪽에서 학생을 선택하세요.</div>
           ) : (

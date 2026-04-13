@@ -112,6 +112,7 @@ export function mergeChunksIntoDb(
     feedbackText: string[][];
     aiLogText: string[][];
     scoreText: string[][];
+    extraText?: string[][];
   },
 ): TeacherDb {
   const assignParts = parseKeyFieldChunks(chunks.assignmentText, [
@@ -135,6 +136,11 @@ export function mergeChunksIntoDb(
   const aiParts = parseAiLogTextRows(chunks.aiLogText);
   const scoreParts = parseScoreTextRows(chunks.scoreText);
 
+  // extra_text: aiInteraction prompt/response, teacherComment text, graspData 등
+  const extraParts = chunks.extraText
+    ? parseKeyFieldChunks(chunks.extraText, ["id", "field", "partIndex", "content"])
+    : new Map<string, string>();
+
   const assignments = slim.assignments.map((a) => ({
     ...a,
     prompt: assignParts.get(`${a.id}\tprompt`) ?? "",
@@ -147,6 +153,7 @@ export function mergeChunksIntoDb(
     draftText: subParts.get(`${s.id}\tdraft`) ?? "",
     reviseText: subParts.get(`${s.id}\trevise`) ?? "",
     finalReportSnapshot: subParts.get(`${s.id}\tfinalSnapshot`) ?? "",
+    graspData: extraParts.get(`sub:${s.id}\tgraspData`) ?? s.graspData ?? "",
   }));
 
   const feedbackNotes = slim.feedbackNotes.map((n) => ({
@@ -165,6 +172,17 @@ export function mergeChunksIntoDb(
     teacherSummary: scoreParts.get(sc.submissionId) ?? sc.teacherSummary ?? "",
   }));
 
+  const aiInteractions = (slim.aiInteractions || []).map((i) => ({
+    ...i,
+    prompt: extraParts.get(`ai:${i.id}\tprompt`) ?? i.prompt ?? "",
+    response: extraParts.get(`ai:${i.id}\tresponse`) ?? i.response ?? "",
+  }));
+
+  const teacherComments = (slim.teacherComments || []).map((c) => ({
+    ...c,
+    text: extraParts.get(`tc:${c.id}\ttext`) ?? c.text ?? "",
+  }));
+
   const { sheetDbVersion: _v, ...rest } = slim as TeacherDb & {
     sheetDbVersion?: number;
   };
@@ -176,6 +194,8 @@ export function mergeChunksIntoDb(
     feedbackNotes,
     aiLogs,
     scores,
+    aiInteractions,
+    teacherComments,
   };
 }
 
@@ -195,6 +215,7 @@ export function toSlimDbForMeta(db: TeacherDb): TeacherDb {
       draftText: "",
       reviseText: "",
       finalReportSnapshot: "",
+      graspData: "", // chunk로 분리
     })),
     feedbackNotes: prepared.feedbackNotes.map((n) => ({
       ...n,
@@ -208,6 +229,15 @@ export function toSlimDbForMeta(db: TeacherDb): TeacherDb {
     scores: prepared.scores.map((sc) => ({
       ...sc,
       teacherSummary: "",
+    })),
+    aiInteractions: (prepared.aiInteractions || []).map((i) => ({
+      ...i,
+      prompt: "", // chunk로 분리
+      response: "", // chunk로 분리
+    })),
+    teacherComments: (prepared.teacherComments || []).map((c) => ({
+      ...c,
+      text: "", // chunk로 분리
     })),
   };
 }
@@ -242,6 +272,7 @@ export function buildChunkSheetValues(db: TeacherDb): {
   feedback_text: string[][];
   ai_log_text: string[][];
   score_text: string[][];
+  extra_text: string[][];
 } {
   const assignment_text: string[][] = [
     ["assignmentId", "field", "partIndex", "content"],
@@ -254,6 +285,7 @@ export function buildChunkSheetValues(db: TeacherDb): {
   ];
   const ai_log_text: string[][] = [["logId", "partIndex", "content"]];
   const score_text: string[][] = [["submissionId", "partIndex", "content"]];
+  const extra_text: string[][] = [["id", "field", "partIndex", "content"]];
 
   for (const a of db.assignments) {
     pushChunks4(a.id, "prompt", a.prompt, assignment_text);
@@ -264,6 +296,10 @@ export function buildChunkSheetValues(db: TeacherDb): {
     pushChunks4(s.id, "draft", s.draftText, submission_text);
     pushChunks4(s.id, "revise", s.reviseText, submission_text);
     pushChunks4(s.id, "finalSnapshot", s.finalReportSnapshot ?? "", submission_text);
+    // graspData를 extra_text 청크로 저장
+    if (s.graspData) {
+      pushChunks4(`sub:${s.id}`, "graspData", s.graspData, extra_text);
+    }
   }
   for (const n of db.feedbackNotes) {
     pushChunks4(n.id, "teacherText", n.teacherText, feedback_text);
@@ -281,6 +317,15 @@ export function buildChunkSheetValues(db: TeacherDb): {
       score_text.push([sc.submissionId, String(partIndex), content]);
     });
   }
+  // aiInteractions의 prompt/response를 extra_text 청크로 저장
+  for (const i of (db.aiInteractions || [])) {
+    if (i.prompt) pushChunks4(`ai:${i.id}`, "prompt", i.prompt, extra_text);
+    if (i.response) pushChunks4(`ai:${i.id}`, "response", i.response, extra_text);
+  }
+  // teacherComments의 text를 extra_text 청크로 저장
+  for (const c of (db.teacherComments || [])) {
+    if (c.text) pushChunks4(`tc:${c.id}`, "text", c.text, extra_text);
+  }
 
   return {
     assignment_text,
@@ -288,6 +333,7 @@ export function buildChunkSheetValues(db: TeacherDb): {
     feedback_text,
     ai_log_text,
     score_text,
+    extra_text,
   };
 }
 

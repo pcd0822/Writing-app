@@ -24,6 +24,8 @@ export async function ensureWorkbookStructure(spreadsheetId: string) {
     "feedback_text",
     "ai_log_text",
     "score_text",
+    /** v5: AI 활용 이력·교사 코멘트·GRASP 등 추가 텍스트 */
+    "extra_text",
   ];
 
   const toAdd = wanted.filter((t) => !existing.has(t));

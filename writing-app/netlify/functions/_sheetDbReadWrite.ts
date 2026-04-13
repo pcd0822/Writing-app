@@ -22,6 +22,7 @@ export function clearDataRanges(): string[] {
     `feedback_text${CLEAR_SUFFIX}`,
     `ai_log_text${CLEAR_SUFFIX}`,
     `score_text${CLEAR_SUFFIX}`,
+    `extra_text${CLEAR_SUFFIX}`,
     `classes${CLEAR_SUFFIX}`,
     `students${CLEAR_SUFFIX}`,
     `assignments${CLEAR_SUFFIX}`,
@@ -45,6 +46,7 @@ export async function readTeacherDbFromSpreadsheet(
     "feedback_text!A:D",
     "ai_log_text!A:C",
     "score_text!A:C",
+    "extra_text!A:D",
   ];
 
   const res = await sheets.spreadsheets.values.batchGet({
@@ -76,6 +78,7 @@ export async function readTeacherDbFromSpreadsheet(
   const feedbackText = (valueRanges[3]?.values || []) as string[][];
   const aiLogText = (valueRanges[4]?.values || []) as string[][];
   const scoreText = (valueRanges[5]?.values || []) as string[][];
+  const extraText = (valueRanges[6]?.values || []) as string[][];
 
   return mergeChunksIntoDb(slim.data, {
     assignmentText,
@@ -83,6 +86,7 @@ export async function readTeacherDbFromSpreadsheet(
     feedbackText,
     aiLogText,
     scoreText,
+    extraText,
   });
 }
 
@@ -117,6 +121,7 @@ export async function writeTeacherDbToSpreadsheet(
     { range: "feedback_text!A1", values: chunks.feedback_text },
     { range: "ai_log_text!A1", values: chunks.ai_log_text },
     { range: "score_text!A1", values: chunks.score_text },
+    { range: "extra_text!A1", values: chunks.extra_text },
     { range: "classes!A1", values: tab.classes },
     { range: "students!A1", values: tab.students },
     { range: "assignments!A1", values: tab.assignments },
