@@ -7,30 +7,47 @@ import styles from "./write.module.css";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { AiTutor } from "@/components/student/AiTutor";
+import { AiWritingPanel } from "@/components/student/AiWritingPanel";
+import { GraspForm } from "@/components/student/GraspForm";
+import { GraspSummary } from "@/components/student/GraspSummary";
+import { StudentDashboard } from "@/components/student/StudentDashboard";
 import { downloadAssignmentZip } from "@/lib/downloadAssignmentPackage";
+import { AI_PROMPTS } from "@/lib/aiWritingPrompts";
+import { callFunction } from "@/lib/netlifyClient";
+import { nanoid } from "nanoid";
 import {
+  addStepTransition,
   findShare,
+  getGraspData,
   getOrCreateSubmission,
   isShareActive,
   loadTeacherDb,
+  markCommentRead,
   mergeStudentViewFromRemote,
   resolveFeedbackNote,
+  stageToStep,
+  stepToStage,
   updateSubmissionWithRemoteMerge,
 } from "@/lib/localDb";
 import type {
+  AiInteraction,
   Assignment,
   ClassRoom,
   FeedbackNote,
+  Grasp,
   Score,
   ShareLink,
   Stage,
+  StepTransition,
   Submission,
+  TeacherComment,
   TeacherDb,
 } from "@/lib/types";
 import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/finalReport";
 import { setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 
 type FeedbackPanelTab = "outline" | "draft" | "revise" | "final";
+type ViewMode = "write" | "dashboard";
 
 const TUTOR_W_KEY = "writing-app:tutorWidthPx";
 const TUTOR_H_KEY = "writing-app:tutorHeightPx";
@@ -66,6 +83,9 @@ type WriteState =
       submission: Submission;
       notes: FeedbackNote[];
       score: Score | null;
+      comments: TeacherComment[];
+      transitions: StepTransition[];
+      aiInteractions: AiInteraction[];
     };
 
 export default function WritePage() {
@@ -104,7 +124,21 @@ export default function WritePage() {
   const [tutorWidth, setTutorWidth] = useState(320);
   const [tutorHeight, setTutorHeight] = useState(520);
 
+  // 새 상태들
+  const [viewMode, setViewMode] = useState<ViewMode>("write");
+  const [showGraspForm, setShowGraspForm] = useState(false);
+  const [graspData, setGraspData] = useState<Grasp | null>(null);
+  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [tutorTriggerLoading, setTutorTriggerLoading] = useState(false);
+  const [tutorTriggerResponse, setTutorTriggerResponse] = useState<string | null>(null);
+
   const [state, setState] = useState<WriteState>({ ok: false, reason: "loading" });
+
+  // 읽지 않은 교사 코멘트 수
+  const unreadCommentCount = useMemo(() => {
+    if (!state.ok) return 0;
+    return state.comments.filter((c) => !c.readAt).length;
+  }, [state]);
 
   useEffect(() => {
     if (!token || !studentNo) {
@@ -138,6 +172,21 @@ export default function WritePage() {
         .filter((n) => n.submissionId === submission.id && !n.resolvedAt)
         .sort((a, b) => a.createdAt - b.createdAt);
       const score = db.scores.find((s) => s.submissionId === submission.id) || null;
+      const comments = (db.teacherComments || [])
+        .filter((c) => c.submissionId === submission.id)
+        .sort((a, b) => b.createdAt - a.createdAt);
+      const transitions = (db.stepTransitions || [])
+        .filter((t) => t.submissionId === submission.id)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      const aiInteractions = (db.aiInteractions || [])
+        .filter((i) => i.submissionId === submission.id)
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      // GRASP 데이터 로드
+      const g = getGraspData(submission);
+      setGraspData(g);
+      if (!g) setShowGraspForm(true);
+
       setState({
         ok: true,
         db,
@@ -147,13 +196,15 @@ export default function WritePage() {
         submission,
         notes,
         score,
+        comments,
+        transitions,
+        aiInteractions,
       });
     } catch {
       setState({ ok: false, reason: "error" });
     }
   }, [token, studentNo, dbBump]);
 
-  /** URL의 sid 또는 공유 링크에 저장된 스프레드시트 ID(교사 DB 연결 시) */
   const effectiveSheetId =
     sid.trim() ||
     (state.ok && state.share.spreadsheetId ? state.share.spreadsheetId.trim() : "") ||
@@ -179,25 +230,15 @@ export default function WritePage() {
       } else {
         setTutorHeight(Math.min(560, window.innerHeight - 32));
       }
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(TUTOR_W_KEY, String(tutorWidth));
-    } catch {
-      /* ignore */
-    }
+    try { localStorage.setItem(TUTOR_W_KEY, String(tutorWidth)); } catch { /* ignore */ }
   }, [tutorWidth]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(TUTOR_H_KEY, String(tutorHeight));
-    } catch {
-      /* ignore */
-    }
+    try { localStorage.setItem(TUTOR_H_KEY, String(tutorHeight)); } catch { /* ignore */ }
   }, [tutorHeight]);
 
   useEffect(() => {
@@ -260,6 +301,7 @@ export default function WritePage() {
     [tutorHeight],
   );
 
+  // 단계 이동 가능 여부: 뒤로 이동은 항상 가능, 앞으로 이동은 승인 후
   const canOpenDraft = state.ok && !!state.submission.outlineApprovedAt;
   const canOpenRevise = state.ok && !!state.submission.draftApprovedAt;
 
@@ -279,6 +321,43 @@ export default function WritePage() {
     setDbBump((v) => v + 1);
   }
 
+  // 탭 전환 시 stepTransition 기록
+  function handleTabChange(newStage: Stage) {
+    if (!state.ok || newStage === tab) return;
+
+    const fromStep = stageToStep(tab);
+    const toStep = stageToStep(newStage);
+    const isForward = toStep > fromStep;
+    const isFirstTimeForward = isForward && !stageApproved(state.submission, tab);
+
+    // 앞으로 이동인데 승인 안 된 경우 차단
+    if (newStage === "draft" && !canOpenDraft) return;
+    if (newStage === "revise" && !canOpenRevise) return;
+
+    let reason: "initial_progress" | "revision_back" | "revision_forward" = "revision_forward";
+    if (isForward && isFirstTimeForward) {
+      reason = "initial_progress";
+    } else if (!isForward) {
+      reason = "revision_back";
+    }
+
+    addStepTransition(
+      {
+        id: nanoid(10),
+        submissionId: state.submission.id,
+        studentNo,
+        fromStep,
+        toStep,
+        timestamp: Date.now(),
+        reason,
+      },
+      sheetSaveOpts,
+    );
+
+    setTab(newStage);
+    bumpDb();
+  }
+
   function persist(stage: Stage, text: string) {
     if (!state.ok) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -286,29 +365,13 @@ export default function WritePage() {
       void (async () => {
         if (!state.ok) return;
         try {
-          if (stage === "outline") {
-            await updateSubmissionWithRemoteMerge(
-              state.submission.id,
-              { outlineText: text },
-              sheetSaveOpts,
-            );
-          } else if (stage === "draft") {
-            await updateSubmissionWithRemoteMerge(
-              state.submission.id,
-              { draftText: text },
-              sheetSaveOpts,
-            );
-          } else {
-            await updateSubmissionWithRemoteMerge(
-              state.submission.id,
-              { reviseText: text },
-              sheetSaveOpts,
-            );
-          }
+          const patch =
+            stage === "outline" ? { outlineText: text } :
+            stage === "draft" ? { draftText: text } :
+            { reviseText: text };
+          await updateSubmissionWithRemoteMerge(state.submission.id, patch, sheetSaveOpts);
           bumpDb();
-        } catch {
-          /* ignore */
-        }
+        } catch { /* ignore */ }
       })();
     }, 120);
   }
@@ -321,11 +384,7 @@ export default function WritePage() {
     }
     await updateSubmissionWithRemoteMerge(
       state.submission.id,
-      {
-        outlineText,
-        draftText,
-        reviseText,
-      },
+      { outlineText, draftText, reviseText },
       sheetSaveOpts,
     );
     bumpDb();
@@ -343,19 +402,31 @@ export default function WritePage() {
     }
   }
 
+  // GRASP 저장
+  async function onGraspSave(grasp: Grasp) {
+    if (!state.ok) return;
+    setGraspData(grasp);
+    setShowGraspForm(false);
+    await updateSubmissionWithRemoteMerge(
+      state.submission.id,
+      { graspData: JSON.stringify(grasp) },
+      sheetSaveOpts,
+    );
+    bumpDb();
+  }
+
   function stageStatusPill(stage: Stage) {
     if (!state.ok) return { label: "", className: styles.statusPillWriting };
     const s = state.submission;
     const sub = stageSubmitted(s, stage);
     const ap = stageApproved(s, stage);
-    if (ap) return { label: "작성완료", className: styles.statusPillDone };
+    if (ap) return { label: "승인완료", className: styles.statusPillDone };
     if (sub && stageEditUnlocked[stage]) return { label: "수정중", className: styles.statusPillEditing };
-    if (sub) return { label: "작성완료", className: styles.statusPillDone };
+    if (sub) return { label: "제출완료", className: styles.statusPillDone };
     return { label: "작성중", className: styles.statusPillWriting };
   }
 
   function currentText(stage: Stage) {
-    if (!state.ok) return "";
     if (stage === "outline") return outlineText;
     if (stage === "draft") return draftText;
     return reviseText;
@@ -377,21 +448,16 @@ export default function WritePage() {
       if (start > cursor) nodes.push(<span key={`t-${cursor}`}>{text.slice(cursor, start)}</span>);
       nodes.push(
         <span key={`m-${n.id}`} className={styles.hlGroup}>
-          <mark
-            id={`note-${n.id}`}
-            className={styles.feedbackMark}
-            title="피드백이 연결된 구간"
-          >
+          <mark id={`note-${n.id}`} className={styles.feedbackMark} title="피드백이 연결된 구간">
             {text.slice(start, end)}
           </mark>
           <button
             type="button"
             className={styles.feedbackIconBtn}
             aria-label="피드백 보기"
-            title="피드백 보기"
             onClick={() => setFeedbackNoteModalId(n.id)}
           >
-            💬
+            [F]
           </button>
         </span>,
       );
@@ -426,28 +492,20 @@ export default function WritePage() {
       setError("내용을 작성한 뒤 제출해주세요.");
       return;
     }
+    // GRASP 필수 체크 (개요 제출 시)
+    if (stage === "outline" && !graspData) {
+      setError("개요 제출 전에 GRASP 맥락 설계를 먼저 완료해주세요.");
+      setShowGraspForm(true);
+      return;
+    }
     await flushSaveToDb();
     setIsSubmitting(true);
     try {
-      if (stage === "outline") {
-        await updateSubmissionWithRemoteMerge(
-          state.submission.id,
-          { outlineSubmittedAt: Date.now() },
-          sheetSaveOpts,
-        );
-      } else if (stage === "draft") {
-        await updateSubmissionWithRemoteMerge(
-          state.submission.id,
-          { draftSubmittedAt: Date.now() },
-          sheetSaveOpts,
-        );
-      } else {
-        await updateSubmissionWithRemoteMerge(
-          state.submission.id,
-          { reviseSubmittedAt: Date.now() },
-          sheetSaveOpts,
-        );
-      }
+      const patch: Partial<Submission> =
+        stage === "outline" ? { outlineSubmittedAt: Date.now() } :
+        stage === "draft" ? { draftSubmittedAt: Date.now() } :
+        { reviseSubmittedAt: Date.now() };
+      await updateSubmissionWithRemoteMerge(state.submission.id, patch, sheetSaveOpts);
       setStageEditUnlocked((prev) => ({ ...prev, [stage]: false }));
       bumpDb();
       setShowSubmitSuccess(true);
@@ -477,11 +535,43 @@ export default function WritePage() {
     return sub && !stageEditUnlocked[stage];
   }
 
+  // AI 튜터 트리거 버튼
+  async function onTutorTrigger() {
+    if (!state.ok || !graspData) return;
+    setTutorTriggerLoading(true);
+    setTutorTriggerResponse(null);
+    try {
+      const stageLabels: Record<Stage, string> = { outline: "개요", draft: "초고", revise: "고쳐쓰기" };
+      let prevContent = "";
+      if (tab === "draft") prevContent = outlineText;
+      else if (tab === "revise") prevContent = draftText;
+
+      const prompt = AI_PROMPTS.tutorFeedback(
+        stageLabels[tab],
+        prevContent,
+        currentText(tab),
+        graspData,
+      );
+      const res = await callFunction<{ text: string }>("gemini-chat", { prompt });
+      setTutorTriggerResponse(res.text || "피드백을 생성하지 못했습니다.");
+    } catch {
+      setTutorTriggerResponse("AI 튜터 피드백 생성 중 오류가 발생했습니다.");
+    } finally {
+      setTutorTriggerLoading(false);
+    }
+  }
+
+  // 교사 코멘트 읽음 처리
+  function onReadComment(commentId: string) {
+    markCommentRead(commentId, sheetSaveOpts);
+    bumpDb();
+  }
+
   if (!state.ok) {
     if (state.reason === "loading") {
       return (
         <div className={styles.page}>
-          <div className={styles.loading}>불러오는 중…</div>
+          <div className={styles.loading}>불러오는 중...</div>
         </div>
       );
     }
@@ -494,8 +584,13 @@ export default function WritePage() {
     );
   }
 
+  // 거부 사유 확인
+  const rejectReason =
+    tab === "outline" ? state.submission.outlineRejectReason :
+    tab === "draft" ? state.submission.draftRejectReason :
+    state.submission.reviseRejectReason;
+
   const contextHint = `${state.assignment.title} / ${stageLabel(tab)} / 학생 ${studentNo}`;
-  const currentStageForSelection = tab;
   const locked = editorLocked(tab);
 
   function onEditorMouseUp(e: React.MouseEvent<HTMLTextAreaElement>) {
@@ -503,21 +598,10 @@ export default function WritePage() {
     const el = e.currentTarget;
     const start = el.selectionStart ?? 0;
     const end = el.selectionEnd ?? 0;
-    if (end <= start) {
-      setSelection(null);
-      return;
-    }
+    if (end <= start) { setSelection(null); return; }
     const text = el.value.slice(start, end).trim();
-    if (!text) {
-      setSelection(null);
-      return;
-    }
-    setSelection({
-      stage: currentStageForSelection,
-      text,
-      x: e.clientX,
-      y: e.clientY,
-    });
+    if (!text) { setSelection(null); return; }
+    setSelection({ stage: tab, text, x: e.clientX, y: e.clientY });
   }
 
   function sendSelectionToAi() {
@@ -534,11 +618,7 @@ export default function WritePage() {
       await downloadAssignmentZip(state.assignment);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      setError(
-        msg.trim()
-          ? msg
-          : "첨부를 내려받지 못했습니다. 잠시 후 다시 시도해주세요.",
-      );
+      setError(msg.trim() ? msg : "첨부를 내려받지 못했습니다.");
     } finally {
       setIsAssignmentDownload(false);
     }
@@ -552,77 +632,84 @@ export default function WritePage() {
 
   const spStatus = stageStatusPill(tab);
   const approvedNow = stageApproved(state.submission, tab);
-  const submitDisabled =
-    !currentText(tab).trim() ||
-    isSubmitting ||
-    !canShowSubmit(tab);
+  const submitDisabled = !currentText(tab).trim() || isSubmitting || !canShowSubmit(tab);
 
   return (
     <div className={styles.page}>
-      <Modal
-        isOpen={showSubmitSuccess}
-        onClose={() => setShowSubmitSuccess(false)}
-        title="완료되었습니다!"
-        description="제출이 반영되었습니다."
-        size="lg"
-        footer={
-          <Button variant="secondary" onClick={() => setShowSubmitSuccess(false)}>
-            확인
-          </Button>
-        }
-      >
+      <Modal isOpen={showSubmitSuccess} onClose={() => setShowSubmitSuccess(false)} title="완료되었습니다!" description="제출이 반영되었습니다." size="lg"
+        footer={<Button variant="secondary" onClick={() => setShowSubmitSuccess(false)}>확인</Button>}>
         <div style={{ fontSize: 14, opacity: 0.85, lineHeight: 1.55 }}>
           교사 검토 후 다음 단계로 진행할 수 있습니다.
         </div>
       </Modal>
 
-      <Modal
-        isOpen={showSaveSuccess}
-        onClose={() => setShowSaveSuccess(false)}
-        title="저장 완료"
-        description="작성 내용이 저장되었습니다."
-        size="lg"
-        footer={
-          <Button variant="secondary" onClick={() => setShowSaveSuccess(false)}>
-            확인
-          </Button>
-        }
-      >
+      <Modal isOpen={showSaveSuccess} onClose={() => setShowSaveSuccess(false)} title="저장 완료" description="작성 내용이 저장되었습니다." size="lg"
+        footer={<Button variant="secondary" onClick={() => setShowSaveSuccess(false)}>확인</Button>}>
         <div style={{ fontSize: 14, lineHeight: 1.55, color: "#0f172a" }}>
           저장이 완료되었습니다! 구글 스프레드시트에 연결된 경우 잠시 후 시트에도 반영됩니다.
         </div>
       </Modal>
 
-      <Modal
-        isOpen={!!feedbackNoteModalId}
-        onClose={() => setFeedbackNoteModalId(null)}
-        title="교사 피드백"
-        size="lg"
-        footer={
-          <Button variant="secondary" onClick={() => setFeedbackNoteModalId(null)}>
-            닫기
-          </Button>
-        }
-      >
+      <Modal isOpen={!!feedbackNoteModalId} onClose={() => setFeedbackNoteModalId(null)} title="교사 피드백" size="lg"
+        footer={<Button variant="secondary" onClick={() => setFeedbackNoteModalId(null)}>닫기</Button>}>
         <div style={{ fontSize: 14, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
-          {feedbackNoteModalId
-            ? state.notes.find((n) => n.id === feedbackNoteModalId)?.teacherText || ""
-            : ""}
+          {feedbackNoteModalId ? state.notes.find((n) => n.id === feedbackNoteModalId)?.teacherText || "" : ""}
+        </div>
+      </Modal>
+
+      {/* GRASP 폼 모달 */}
+      <Modal isOpen={showGraspForm} onClose={() => { if (graspData) setShowGraspForm(false); }} title="GRASP 맥락 설계" size="xl">
+        <GraspForm initial={graspData} onSave={onGraspSave} />
+      </Modal>
+
+      {/* 대시보드 모달 */}
+      <Modal isOpen={viewMode === "dashboard"} onClose={() => setViewMode("write")} title="사고 성장 대시보드" size="xl"
+        footer={<Button variant="secondary" onClick={() => setViewMode("write")}>닫기</Button>}>
+        <StudentDashboard
+          submission={state.submission}
+          transitions={state.transitions}
+          aiInteractions={state.aiInteractions}
+          grasp={graspData}
+        />
+      </Modal>
+
+      {/* AI 튜터 트리거 응답 모달 */}
+      <Modal isOpen={!!tutorTriggerResponse} onClose={() => setTutorTriggerResponse(null)} title="AI 튜터 피드백" size="lg"
+        footer={<Button variant="secondary" onClick={() => setTutorTriggerResponse(null)}>닫기</Button>}>
+        <div style={{ fontSize: 14, lineHeight: 1.65, whiteSpace: "pre-wrap", color: "#0f172a" }}>
+          {tutorTriggerResponse}
         </div>
       </Modal>
 
       <div
         className={styles.shell}
         style={{
-          gridTemplateColumns: `minmax(286px, 390px) minmax(0, 1fr) ${tutorWidth}px`,
+          gridTemplateColumns: showAiPanel
+            ? `minmax(260px, 340px) minmax(0, 1fr) ${tutorWidth}px ${tutorWidth}px`
+            : `minmax(286px, 390px) minmax(0, 1fr) ${tutorWidth}px`,
         }}
       >
+        {/* ── 좌측 패널: 과제 정보 + GRASP + 피드백 ── */}
         <aside className={styles.assignmentPanel}>
           <div className={styles.assignmentScroll}>
             <div className={styles.assignmentTitle}>{state.assignment.title}</div>
             <div className={styles.assignmentMeta}>
               학생 {studentNo} · {state.cls.name}
             </div>
+
+            {/* GRASP 요약 */}
+            {graspData ? (
+              <GraspSummary grasp={graspData} onEdit={() => setShowGraspForm(true)} />
+            ) : (
+              <button
+                type="button"
+                className={styles.attachBtn}
+                onClick={() => setShowGraspForm(true)}
+              >
+                GRASP 맥락 설계하기
+              </button>
+            )}
+
             <div>
               <div className={styles.sectionLabel}>제시문</div>
               <div className={styles.assignmentPrompt}>
@@ -633,36 +720,47 @@ export default function WritePage() {
               <div className={styles.sectionLabel}>과제</div>
               <div className={styles.assignmentTask}>{state.assignment.task}</div>
             </div>
-            <button
-              type="button"
-              className={styles.attachBtn}
-              disabled={isAssignmentDownload}
-              onClick={() => void onDownloadAssignment()}
-            >
-              {isAssignmentDownload ? "준비 중…" : "첨부 다운로드"}
+            <button type="button" className={styles.attachBtn} disabled={isAssignmentDownload} onClick={() => void onDownloadAssignment()}>
+              {isAssignmentDownload ? "준비 중..." : "첨부 다운로드"}
             </button>
 
-            <div className={styles.sectionLabel} style={{ marginTop: 12 }}>
-              교사 피드백 보기
-            </div>
+            {/* 교사 코멘트 알림 */}
+            {state.comments.length > 0 ? (
+              <div style={{ marginTop: 8 }}>
+                <div className={styles.sectionLabel}>
+                  교사 코멘트 {unreadCommentCount > 0 ? (
+                    <span className={styles.statusPill} style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b", fontSize: 10, padding: "2px 8px", marginLeft: 4 }}>
+                      {unreadCommentCount}개 새 코멘트
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {state.comments.slice(0, 5).map((c) => (
+                    <div key={c.id} className={styles.noteBox} style={{ padding: "8px 10px" }}>
+                      <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4 }}>
+                        [{c.stage === "outline" ? "개요" : c.stage === "draft" ? "초고" : "고쳐쓰기"}]
+                        {" "}{new Date(c.createdAt).toLocaleString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {!c.readAt ? <span style={{ color: "#ef4444", fontWeight: 800, marginLeft: 4 }}>NEW</span> : null}
+                      </div>
+                      <div style={{ fontSize: 12, lineHeight: 1.55, color: "#0f172a" }}>{c.text}</div>
+                      {!c.readAt ? (
+                        <button type="button" className={styles.smallBtn} style={{ marginTop: 4, height: 26, fontSize: 10 }} onClick={() => onReadComment(c.id)}>
+                          읽음 처리
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className={styles.sectionLabel} style={{ marginTop: 12 }}>교사 피드백 보기</div>
             <div className={styles.feedbackPanelTabs}>
               {(["outline", "draft", "revise", "final"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={[
-                    styles.feedbackTabBtn,
-                    feedbackPanelTab === t ? styles.feedbackTabBtnOn : "",
-                  ].join(" ")}
-                  onClick={() => setFeedbackPanelTab(t)}
-                >
-                  {t === "outline"
-                    ? "개요"
-                    : t === "draft"
-                      ? "초고"
-                      : t === "revise"
-                        ? "고쳐쓰기"
-                        : "최종"}
+                <button key={t} type="button"
+                  className={[styles.feedbackTabBtn, feedbackPanelTab === t ? styles.feedbackTabBtnOn : ""].join(" ")}
+                  onClick={() => setFeedbackPanelTab(t)}>
+                  {t === "outline" ? "개요" : t === "draft" ? "초고" : t === "revise" ? "고쳐쓰기" : "최종"}
                 </button>
               ))}
             </div>
@@ -676,19 +774,11 @@ export default function WritePage() {
               ) : (
                 <div className={styles.feedbackReadonly}>
                   <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
-                    {feedbackPanelTab === "outline"
-                      ? "개요 글 중 피드백 구간"
-                      : feedbackPanelTab === "draft"
-                        ? "초고 글 중 피드백 구간"
-                        : "고쳐쓰기 글 중 피드백 구간"}
+                    {feedbackPanelTab === "outline" ? "개요" : feedbackPanelTab === "draft" ? "초고" : "고쳐쓰기"} 글 중 피드백 구간
                   </div>
                   <div className={styles.quote} style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
                     {renderFeedbackInText(
-                      feedbackPanelTab === "outline"
-                        ? outlineText
-                        : feedbackPanelTab === "draft"
-                          ? draftText
-                          : reviseText,
+                      feedbackPanelTab === "outline" ? outlineText : feedbackPanelTab === "draft" ? draftText : reviseText,
                       feedbackPanelTab,
                     )}
                   </div>
@@ -698,16 +788,29 @@ export default function WritePage() {
           </div>
         </aside>
 
+        {/* ── 중앙: 에디터 ── */}
         <div className={styles.panel}>
           <div className={styles.head}>
-            <div className={styles.title}>작문</div>
-            <div className={styles.sub}>단계별로 작성하고 제출하세요.</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className={styles.title}>작문</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className={styles.stepBtnSecondary} style={{ height: 30, fontSize: 11 }}
+                  onClick={() => setShowAiPanel(!showAiPanel)}>
+                  {showAiPanel ? "AI 패널 닫기" : "AI 협력 글쓰기"}
+                </button>
+                <button type="button" className={styles.stepBtnSecondary} style={{ height: 30, fontSize: 11 }}
+                  onClick={() => setViewMode("dashboard")}>
+                  성장 대시보드
+                </button>
+              </div>
+            </div>
+            <div className={styles.sub}>단계별로 작성하고 제출하세요. 이전 단계로 자유롭게 돌아갈 수 있습니다.</div>
           </div>
 
           <div className={styles.tabs}>
             <button
               className={[styles.tab, tab === "outline" ? styles.tabActive : ""].join(" ")}
-              onClick={() => setTab("outline")}
+              onClick={() => handleTabChange("outline")}
             >
               개요
             </button>
@@ -717,10 +820,10 @@ export default function WritePage() {
                 tab === "draft" ? styles.tabActive : "",
                 !canOpenDraft ? styles.tabDisabled : "",
               ].join(" ")}
-              onClick={() => canOpenDraft && setTab("draft")}
+              onClick={() => canOpenDraft && handleTabChange("draft")}
               disabled={!canOpenDraft}
             >
-              초고
+              초고 {!canOpenDraft ? "(승인 대기)" : ""}
             </button>
             <button
               className={[
@@ -728,10 +831,10 @@ export default function WritePage() {
                 tab === "revise" ? styles.tabActive : "",
                 !canOpenRevise ? styles.tabDisabled : "",
               ].join(" ")}
-              onClick={() => canOpenRevise && setTab("revise")}
+              onClick={() => canOpenRevise && handleTabChange("revise")}
               disabled={!canOpenRevise}
             >
-              고쳐쓰기
+              고쳐쓰기 {!canOpenRevise ? "(승인 대기)" : ""}
             </button>
           </div>
 
@@ -742,13 +845,8 @@ export default function WritePage() {
             </div>
             <div className={styles.stageToolbarRight}>
               {!approvedNow ? (
-                <button
-                  type="button"
-                  className={styles.stepBtnPrimary}
-                  disabled={submitDisabled}
-                  onClick={() => void onSubmitStage(tab)}
-                >
-                  {isSubmitting ? "제출 중…" : "제출하기"}
+                <button type="button" className={styles.stepBtnPrimary} disabled={submitDisabled} onClick={() => void onSubmitStage(tab)}>
+                  {isSubmitting ? "제출 중..." : "제출하기"}
                 </button>
               ) : null}
               {canShowEdit(tab) ? (
@@ -760,6 +858,13 @@ export default function WritePage() {
           </div>
 
           <div className={styles.body}>
+            {/* 거부 사유 표시 */}
+            {rejectReason ? (
+              <div className={styles.error} style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#713f12" }}>
+                교사 피드백: {rejectReason}
+              </div>
+            ) : null}
+
             <div className={styles.editorLabel}>
               {tab === "outline"
                 ? "개요는 Markdown으로 작성할 수 있어요."
@@ -774,7 +879,7 @@ export default function WritePage() {
               placeholder={
                 tab === "outline"
                   ? "- 주장\n  - 근거 1\n  - 근거 2\n- 예상 반론과 재반박\n"
-                  : "여기에 글을 작성하세요…"
+                  : "여기에 글을 작성하세요..."
               }
               disabled={locked}
             />
@@ -782,14 +887,9 @@ export default function WritePage() {
             {selection ? (
               <div className={styles.selectionBar}>
                 <div className={styles.selectionText}>
-                  선택됨: {selection.text.length > 220 ? `${selection.text.slice(0, 220)}…` : selection.text}
+                  선택됨: {selection.text.length > 220 ? `${selection.text.slice(0, 220)}...` : selection.text}
                 </div>
-                <button
-                  type="button"
-                  className={styles.questionBtn}
-                  onClick={sendSelectionToAi}
-                  title="이 구간을 AI 튜터에 참고로 보내기"
-                >
+                <button type="button" className={styles.questionBtn} onClick={sendSelectionToAi} title="이 구간을 AI 튜터에 참고로 보내기">
                   ?
                 </button>
               </div>
@@ -808,8 +908,7 @@ export default function WritePage() {
               <div className={styles.noteBox}>
                 <div className={styles.noteTitle}>교사 메모(첨삭)</div>
                 <div className={styles.quote} style={{ marginBottom: 10 }}>
-                  아래 “초고 하이라이트”에서 메모가 달린 구간이 표시됩니다. 해당 구간을 수정한 뒤
-                  “첨삭 완료”를 누르면 하이라이트가 사라집니다.
+                  아래 "초고 하이라이트"에서 메모가 달린 구간이 표시됩니다.
                 </div>
                 <div className={styles.noteBox} style={{ marginBottom: 10 }}>
                   <div className={styles.noteTitle}>초고 하이라이트</div>
@@ -825,11 +924,7 @@ export default function WritePage() {
                     <div key={n.id} className={styles.noteItem}>
                       <div className={styles.quote}>{n.anchorText}</div>
                       <div className={styles.teacherText}>{n.teacherText}</div>
-                      <button
-                        className={styles.smallBtn}
-                        onClick={() => onResolveNote(n.id)}
-                        title="이 메모에 대한 첨삭을 완료했으면 완료 처리하세요."
-                      >
+                      <button className={styles.smallBtn} onClick={() => onResolveNote(n.id)}>
                         첨삭 완료
                       </button>
                     </div>
@@ -843,6 +938,7 @@ export default function WritePage() {
                 <div className={styles.teacherText}>{state.score.teacherSummary}</div>
                 <div className={styles.quote}>
                   점수: <b>{state.score.score ?? "미입력"}</b>
+                  {state.score.isFinalized ? " (최종 확정)" : " (임시)"}
                 </div>
               </div>
             ) : null}
@@ -855,6 +951,7 @@ export default function WritePage() {
           </div>
         </div>
 
+        {/* ── 우측: AI 튜터 ── */}
         <div className={styles.tutorCol} style={{ height: tutorHeight }}>
           <div className={styles.tutorResizeWidth} onMouseDown={onResizeWidthStart} title="너비 조절" />
           <div className={styles.tutorInner}>
@@ -864,11 +961,45 @@ export default function WritePage() {
               contextHint={contextHint}
               referenceText={aiReference}
               spreadsheetId={effectiveSheetId || undefined}
+              submission={state.submission}
+              assignment={state.assignment}
+              feedbackNotes={state.notes}
+              grasp={graspData}
             />
           </div>
           <div className={styles.tutorResizeHeight} onMouseDown={onResizeHeightStart} title="높이 조절" />
         </div>
+
+        {/* ── AI 협력 글쓰기 패널 (토글) ── */}
+        {showAiPanel ? (
+          <div className={styles.tutorCol} style={{ height: tutorHeight }}>
+            <div className={styles.tutorInner}>
+              <AiWritingPanel
+                submissionId={state.submission.id}
+                stage={tab}
+                selectedText={selection?.text || ""}
+                currentText={currentText(tab)}
+                outlineText={outlineText}
+                grasp={graspData}
+                spreadsheetId={effectiveSheetId || undefined}
+                onBump={bumpDb}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
+
+      {/* AI 튜터 트리거 플로팅 버튼 */}
+      <button
+        type="button"
+        className={styles.questionFloat}
+        style={{ position: "fixed", bottom: 24, right: 24, width: "auto", height: "auto", padding: "10px 16px", fontSize: 12, fontWeight: 800, zIndex: 90, borderRadius: 14 }}
+        onClick={onTutorTrigger}
+        disabled={tutorTriggerLoading || !graspData}
+        title="현재 단계와 이전 단계를 비교하여 AI 튜터 피드백을 받습니다"
+      >
+        {tutorTriggerLoading ? "분석 중..." : "AI 튜터에게 물어보기"}
+      </button>
 
       {selection ? (
         <button
@@ -896,17 +1027,15 @@ function FinalStudentReport({ snap }: { snap: FinalReportSnapshotV1 | null }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 13, fontWeight: 800 }}>최종 점수: {snap.totalScore}</div>
       <div style={{ fontSize: 12, opacity: 0.85 }}>
-        부분 점수 — 개요: {snap.partialScores.outline ?? "—"} / 초고: {snap.partialScores.draft ?? "—"} / 고쳐쓰기:{" "}
-        {snap.partialScores.revise ?? "—"}
+        부분 점수 -- 개요: {snap.partialScores.outline ?? "--"} / 초고: {snap.partialScores.draft ?? "--"} / 고쳐쓰기:{" "}
+        {snap.partialScores.revise ?? "--"}
       </div>
       <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{snap.teacherSummary}</div>
       <div style={{ fontSize: 12, opacity: 0.85, whiteSpace: "pre-wrap" }}>{snap.narrativeSummary}</div>
       <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>질문 키워드</div>
       <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
         {snap.questionStats.wordFrequency.slice(0, 8).map((w) => (
-          <li key={w.word}>
-            {w.word} — {w.count}회
-          </li>
+          <li key={w.word}>{w.word} -- {w.count}회</li>
         ))}
       </ul>
       <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>교사 메모 요약</div>

@@ -9,7 +9,10 @@ import {
   type Submission,
   type ShareLink,
   type AiLog,
+  type AiInteraction,
   type Score,
+  type StepTransition,
+  type TeacherComment,
   type TeacherDb,
 } from "./types";
 import { normalizeDriveAttachmentsInDb } from "./attachments";
@@ -23,7 +26,7 @@ import {
 const KEY = "writing-app:teacherDb:v1";
 
 const defaultDb: TeacherDb = {
-  version: 4,
+  version: 5,
   classes: [],
   assignments: [],
   allocations: [],
@@ -32,6 +35,9 @@ const defaultDb: TeacherDb = {
   feedbackNotes: [],
   aiLogs: [],
   scores: [],
+  stepTransitions: [],
+  aiInteractions: [],
+  teacherComments: [],
 };
 
 function assertBrowser() {
@@ -40,7 +46,7 @@ function assertBrowser() {
   }
 }
 
-function migrateV3RawToV4(parsed: Record<string, unknown>): TeacherDb {
+function migrateV3RawToV4(parsed: Record<string, unknown>): Record<string, unknown> {
   const submissions = ((parsed.submissions as Submission[]) || []).map((s) => ({
     ...s,
     finalReportPublishedAt: (s as Submission).finalReportPublishedAt ?? null,
@@ -65,48 +71,62 @@ function migrateV3RawToV4(parsed: Record<string, unknown>): TeacherDb {
   };
 }
 
+function migrateToV5(parsed: Record<string, unknown>): TeacherDb {
+  const submissions = ((parsed.submissions as Submission[]) || []).map((s) => ({
+    ...s,
+    graspData: (s as Submission).graspData ?? "",
+    outlineRejectReason: (s as Submission).outlineRejectReason ?? "",
+    draftRejectReason: (s as Submission).draftRejectReason ?? "",
+    reviseRejectReason: (s as Submission).reviseRejectReason ?? "",
+    currentStep: (s as Submission).currentStep ?? 1,
+    finalReportPublishedAt: (s as Submission).finalReportPublishedAt ?? null,
+    finalReportSnapshot: (s as Submission).finalReportSnapshot ?? "",
+  }));
+  const scores = ((parsed.scores as Score[]) || []).map((sc) => ({
+    ...sc,
+    outlineScore: (sc as Score).outlineScore ?? null,
+    draftScore: (sc as Score).draftScore ?? null,
+    reviseScore: (sc as Score).reviseScore ?? null,
+    isFinalized: (sc as Score).isFinalized ?? false,
+  }));
+  return {
+    version: 5,
+    classes: (parsed.classes as TeacherDb["classes"]) || [],
+    assignments: (parsed.assignments as TeacherDb["assignments"]) || [],
+    allocations: (parsed.allocations as TeacherDb["allocations"]) || [],
+    shares: (parsed.shares as TeacherDb["shares"]) || [],
+    submissions,
+    feedbackNotes: (parsed.feedbackNotes as TeacherDb["feedbackNotes"]) || [],
+    aiLogs: (parsed.aiLogs as TeacherDb["aiLogs"]) || [],
+    scores,
+    stepTransitions: (parsed.stepTransitions as TeacherDb["stepTransitions"]) || [],
+    aiInteractions: (parsed.aiInteractions as TeacherDb["aiInteractions"]) || [],
+    teacherComments: (parsed.teacherComments as TeacherDb["teacherComments"]) || [],
+  };
+}
+
 export function loadTeacherDb(): TeacherDb {
   assertBrowser();
   const raw = window.localStorage.getItem(KEY);
   if (!raw) return defaultDb;
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+    let parsed = JSON.parse(raw) as Record<string, unknown> | null;
     if (!parsed) return defaultDb;
 
-    if (parsed.version === 3) {
-      const migrated = migrateV3RawToV4(parsed);
-      saveTeacherDb(migrated);
-      const v4 = TeacherDbSchema.safeParse(migrated);
-      return v4.success ? v4.data : defaultDb;
-    }
-
-    const v4 = TeacherDbSchema.safeParse(parsed);
-    if (v4.success) return v4.data;
-
-    // v1 -> v2 마이그레이션 (classes만 있던 버전)
-    if (parsed && parsed.version === 1 && Array.isArray(parsed.classes)) {
-      const v2 = {
+    // v1 -> v2
+    if (parsed.version === 1 && Array.isArray(parsed.classes)) {
+      parsed = {
         version: 2,
         classes: parsed.classes,
         assignments: [],
         allocations: [],
         shares: [],
       };
-      const migrated: TeacherDb = {
-        ...v2,
-        version: 4,
-        submissions: [],
-        feedbackNotes: [],
-        aiLogs: [],
-        scores: [],
-      };
-      saveTeacherDb(migrated);
-      return migrated;
     }
 
-    // v2 -> v4 마이그레이션
-    if (parsed && parsed.version === 2) {
-      const migrated: TeacherDb = {
+    // v2 -> v4
+    if (parsed.version === 2) {
+      parsed = {
         version: 4,
         classes: (parsed.classes as ClassRoom[]) || [],
         assignments: (parsed.assignments as TeacherDb["assignments"]) || [],
@@ -117,11 +137,31 @@ export function loadTeacherDb(): TeacherDb {
         aiLogs: [],
         scores: [],
       };
-      saveTeacherDb(migrated);
-      return migrated;
     }
 
-    return defaultDb;
+    // v3 -> v4
+    if (parsed.version === 3) {
+      parsed = migrateV3RawToV4(parsed);
+    }
+
+    // v4 -> v5
+    if (parsed.version === 4) {
+      parsed = migrateToV5(parsed);
+    }
+
+    const result = TeacherDbSchema.safeParse(parsed);
+    if (result.success) {
+      // 마이그레이션이 발생했으면 저장
+      if (raw && JSON.parse(raw).version !== 5) {
+        saveTeacherDb(result.data);
+      }
+      return result.data;
+    }
+
+    // 직접 v5 변환 시도
+    const fallback = migrateToV5(parsed);
+    saveTeacherDb(fallback);
+    return fallback;
   } catch {
     return defaultDb;
   }
@@ -279,6 +319,11 @@ export function getOrCreateSubmission(params: {
     finalApprovedAt: null,
     finalReportPublishedAt: null,
     finalReportSnapshot: "",
+    graspData: "",
+    outlineRejectReason: "",
+    draftRejectReason: "",
+    reviseRejectReason: "",
+    currentStep: 1,
   };
   const next = { ...db, submissions: [submission, ...db.submissions] };
   saveTeacherDb(next);
@@ -346,12 +391,27 @@ export function mergeTeacherDbForStudentView(local: TeacherDb, remote: TeacherDb
   for (const l of remote.aiLogs) logMap.set(l.id, l);
   const aiLogs = [...logMap.values()].sort((a, b) => b.createdAt - a.createdAt);
 
+  const transMap = new Map(local.stepTransitions.map((t) => [t.id, t]));
+  for (const t of remote.stepTransitions) transMap.set(t.id, t);
+  const stepTransitions = [...transMap.values()].sort((a, b) => a.timestamp - b.timestamp);
+
+  const interMap = new Map(local.aiInteractions.map((i) => [i.id, i]));
+  for (const i of remote.aiInteractions) interMap.set(i.id, i);
+  const aiInteractions = [...interMap.values()].sort((a, b) => a.timestamp - b.timestamp);
+
+  const commentMap = new Map(local.teacherComments.map((c) => [c.id, c]));
+  for (const c of remote.teacherComments) commentMap.set(c.id, c);
+  const teacherComments = [...commentMap.values()].sort((a, b) => a.createdAt - b.createdAt);
+
   return {
     ...remote,
     submissions: mergedSubmissions,
     feedbackNotes,
     scores,
     aiLogs,
+    stepTransitions,
+    aiInteractions,
+    teacherComments,
   };
 }
 
@@ -452,6 +512,97 @@ export function getCurrentStage(submission: Submission): Stage {
   if (!submission.outlineApprovedAt) return "outline";
   if (!submission.draftApprovedAt) return "draft";
   if (!submission.reviseApprovedAt) return "revise";
+  return "revise";
+}
+
+// ── Step Transition CRUD ────────────────────────────────────────
+
+export function addStepTransition(
+  transition: StepTransition,
+  options?: { spreadsheetId?: string | null },
+) {
+  const db = loadTeacherDb();
+  saveTeacherDb(
+    { ...db, stepTransitions: [...db.stepTransitions, transition] },
+    { spreadsheetId: options?.spreadsheetId },
+  );
+}
+
+// ── AI Interaction CRUD ─────────────────────────────────────────
+
+export function addAiInteraction(
+  interaction: AiInteraction,
+  options?: { spreadsheetId?: string | null },
+) {
+  const db = loadTeacherDb();
+  saveTeacherDb(
+    { ...db, aiInteractions: [...db.aiInteractions, interaction] },
+    { spreadsheetId: options?.spreadsheetId },
+  );
+}
+
+export function updateAiInteractionAction(
+  interactionId: string,
+  action: AiInteraction["action"],
+  options?: { spreadsheetId?: string | null },
+) {
+  const db = loadTeacherDb();
+  const next = {
+    ...db,
+    aiInteractions: db.aiInteractions.map((i) =>
+      i.id === interactionId ? { ...i, action } : i,
+    ),
+  };
+  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId });
+}
+
+// ── Teacher Comment CRUD ────────────────────────────────────────
+
+export function addTeacherComment(
+  comment: TeacherComment,
+  options?: { spreadsheetId?: string | null },
+) {
+  const db = loadTeacherDb();
+  saveTeacherDb(
+    { ...db, teacherComments: [comment, ...db.teacherComments] },
+    { spreadsheetId: options?.spreadsheetId },
+  );
+}
+
+export function markCommentRead(
+  commentId: string,
+  options?: { spreadsheetId?: string | null },
+) {
+  const db = loadTeacherDb();
+  const next = {
+    ...db,
+    teacherComments: db.teacherComments.map((c) =>
+      c.id === commentId ? { ...c, readAt: Date.now() } : c,
+    ),
+  };
+  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId });
+}
+
+// ── GRASP helpers ───────────────────────────────────────────────
+
+export function getGraspData(submission: Submission) {
+  if (!submission.graspData) return null;
+  try {
+    return JSON.parse(submission.graspData) as import("./types").Grasp;
+  } catch {
+    return null;
+  }
+}
+
+export function stageToStep(stage: Stage): number {
+  if (stage === "outline") return 1;
+  if (stage === "draft") return 2;
+  return 3;
+}
+
+export function stepToStage(step: number): Stage {
+  if (step <= 1) return "outline";
+  if (step === 2) return "draft";
   return "revise";
 }
 

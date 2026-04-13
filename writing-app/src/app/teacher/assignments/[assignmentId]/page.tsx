@@ -3,10 +3,36 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import styles from "./teacher-assignment.module.css";
-import { addFeedbackNote, loadTeacherDb, updateSubmission, upsertScore } from "@/lib/localDb";
+import {
+  addFeedbackNote,
+  addTeacherComment,
+  getGraspData,
+  loadTeacherDb,
+  updateSubmission,
+  upsertScore,
+} from "@/lib/localDb";
 import { nanoid } from "nanoid";
-import type { AiLog, FeedbackNote, Score, Stage, Submission } from "@/lib/types";
+import type {
+  AiInteraction,
+  AiLog,
+  FeedbackNote,
+  Grasp,
+  Score,
+  Stage,
+  StepTransition,
+  Submission,
+  TeacherComment,
+} from "@/lib/types";
 import { buildFinalReportSnapshot } from "@/lib/finalReport";
+import { GraspSummary } from "@/components/student/GraspSummary";
+
+const FEEDBACK_TEMPLATES = [
+  "개요에서 세운 논점이 초고에서 어떻게 구체화되었는지 확인해보세요.",
+  "수정 단계에서 독자를 더 고려해서 표현을 다듬어보세요.",
+  "초고의 논거가 개요의 핵심 주장을 충분히 뒷받침하고 있나요?",
+  "독자의 관점에서 가장 설득력 있는 부분과 보완이 필요한 부분을 표시해보세요.",
+  "이전 단계의 피드백이 이번 수정에 어떻게 반영되었는지 설명해주세요.",
+];
 
 function stageText(stage: Stage) {
   if (stage === "outline") return "개요";
@@ -46,6 +72,16 @@ export default function TeacherAssignmentPage() {
   const [dbBump, setDbBump] = useState(0);
   const [dropQuote, setDropQuote] = useState<string | null>(null);
   const [pendingRange, setPendingRange] = useState<{ start: number; end: number } | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectStage, setRejectStage] = useState<Stage>("outline");
+
+  // 실시간 모니터링 자동 새로고침
+  useEffect(() => {
+    const id = window.setInterval(() => setDbBump((v) => v + 1), 8000);
+    return () => clearInterval(id);
+  }, []);
 
   const state = useMemo(() => {
     try {
@@ -93,11 +129,18 @@ export default function TeacherAssignmentPage() {
       .filter((l) => l.submissionId === sub.id)
       .sort((a, b) => a.createdAt - b.createdAt);
     const scoreRow = state.db.scores.find((s) => s.submissionId === sub.id) || null;
-    return { sub, notes, logs, scoreRow };
+    const grasp = getGraspData(sub);
+    const comments = (state.db.teacherComments || [])
+      .filter((c) => c.submissionId === sub.id)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const transitions = (state.db.stepTransitions || [])
+      .filter((t) => t.submissionId === sub.id);
+    const aiInteractions = (state.db.aiInteractions || [])
+      .filter((i) => i.submissionId === sub.id);
+    return { sub, notes, logs, scoreRow, grasp, comments, transitions, aiInteractions };
   }, [state, selectedSubmissionId]);
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- 선택 학생/점수 행이 바뀔 때 폼을 DB 값과 동기화 */
     if (!selected?.scoreRow) {
       setGeneralFeedback("");
       setScore("");
@@ -111,15 +154,13 @@ export default function TeacherAssignmentPage() {
     setOutlinePart(selected.scoreRow.outlineScore ?? "");
     setDraftPart(selected.scoreRow.draftScore ?? "");
     setRevisePart(selected.scoreRow.reviseScore ?? "");
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selected?.sub.id, selected?.scoreRow?.submissionId]);
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- 학생·탭 전환 시 드래그 인용 초기화 */
     setDropQuote(null);
     setPendingRange(null);
     setNoteText("");
-    /* eslint-enable react-hooks/set-state-in-effect */
+    setCommentText("");
   }, [selectedSubmissionId, dashTab]);
 
   function bump() {
@@ -164,9 +205,34 @@ export default function TeacherAssignmentPage() {
       }
     }
 
-    if (stage === "outline") updateSubmission(subId, { outlineApprovedAt: Date.now() });
-    if (stage === "draft") updateSubmission(subId, { draftApprovedAt: Date.now() });
-    if (stage === "revise") updateSubmission(subId, { reviseApprovedAt: Date.now(), finalApprovedAt: Date.now() });
+    // 승인 시 거부 사유 초기화
+    if (stage === "outline") updateSubmission(subId, { outlineApprovedAt: Date.now(), outlineRejectReason: "" });
+    if (stage === "draft") updateSubmission(subId, { draftApprovedAt: Date.now(), draftRejectReason: "" });
+    if (stage === "revise") updateSubmission(subId, { reviseApprovedAt: Date.now(), reviseRejectReason: "", finalApprovedAt: Date.now() });
+    bump();
+  }
+
+  function openRejectModal(stage: Stage) {
+    setRejectStage(stage);
+    setRejectReason("");
+    setShowRejectModal(true);
+  }
+
+  function confirmReject() {
+    if (!selected || !rejectReason.trim()) return;
+    const patch: Partial<Submission> = {};
+    if (rejectStage === "outline") {
+      patch.outlineRejectReason = rejectReason.trim();
+      patch.outlineSubmittedAt = null; // 재제출 가능하도록
+    } else if (rejectStage === "draft") {
+      patch.draftRejectReason = rejectReason.trim();
+      patch.draftSubmittedAt = null;
+    } else {
+      patch.reviseRejectReason = rejectReason.trim();
+      patch.reviseSubmittedAt = null;
+    }
+    updateSubmission(selected.sub.id, patch);
+    setShowRejectModal(false);
     bump();
   }
 
@@ -174,9 +240,7 @@ export default function TeacherAssignmentPage() {
     setError(null);
     const db = loadTeacherDb();
     const sub = db.submissions.find((s) => s.id === subId);
-    if (!sub) return;
-    if (!sub.finalApprovedAt) return;
-    // 최종 승인/배포 상태를 되돌려, 학생이 다시 고쳐쓰기 단계로 작업할 수 있게 함
+    if (!sub || !sub.finalApprovedAt) return;
     updateSubmission(subId, {
       reviseApprovedAt: null,
       finalApprovedAt: null,
@@ -231,6 +295,23 @@ export default function TeacherAssignmentPage() {
     bump();
   }
 
+  function sendComment() {
+    if (!selected || dashTab === "final") return;
+    const text = commentText.trim();
+    if (!text) return;
+
+    addTeacherComment({
+      id: nanoid(12),
+      submissionId: selected.sub.id,
+      stage: dashTab as Stage,
+      createdAt: Date.now(),
+      text,
+      readAt: null,
+    });
+    setCommentText("");
+    bump();
+  }
+
   function saveScore() {
     setError(null);
     if (!selected) return;
@@ -251,6 +332,7 @@ export default function TeacherAssignmentPage() {
       outlineScore: o,
       draftScore: d,
       reviseScore: r,
+      isFinalized: selected.scoreRow?.isFinalized ?? false,
     });
     bump();
   }
@@ -281,6 +363,10 @@ export default function TeacherAssignmentPage() {
       finalReportSnapshot: JSON.stringify(snap),
       finalReportPublishedAt: Date.now(),
     });
+    // 점수 최종 확정
+    if (scoreRow) {
+      upsertScore({ ...scoreRow, isFinalized: true });
+    }
     bump();
   }
 
@@ -303,9 +389,7 @@ export default function TeacherAssignmentPage() {
       const base = textForStage(selected.sub, stage);
       const start = base.indexOf(q);
       if (start >= 0) setPendingRange({ start, end: start + q.length });
-      else {
-        setPendingRange({ start: 0, end: Math.min(q.length, base.length) });
-      }
+      else setPendingRange({ start: 0, end: Math.min(q.length, base.length) });
     },
     [dashTab, selected],
   );
@@ -323,22 +407,47 @@ export default function TeacherAssignmentPage() {
 
   return (
     <div className={styles.page}>
+      {/* 거부 모달 */}
+      {showRejectModal ? (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)" }}
+          onClick={() => setShowRejectModal(false)}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 20, maxWidth: 420, width: "90%", color: "#0f172a" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 10 }}>
+              {stageText(rejectStage)} 거부 사유
+            </div>
+            <textarea
+              className={styles.textarea}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="학생에게 전달할 거부 사유를 입력하세요..."
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+              <button type="button" className={styles.smallBtn} onClick={() => setShowRejectModal(false)}>취소</button>
+              <button type="button" className={styles.approveBtn} style={{ background: "#fecaca", borderColor: "#ef4444", color: "#991b1b" }}
+                onClick={confirmReject} disabled={!rejectReason.trim()}>거부 확인</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className={styles.top}>
         <button className={styles.back} onClick={() => router.push("/teacher")}>
           ← 교사 화면
         </button>
         <div>
           <div className={styles.title}>{state.assignment.title}</div>
-          <div className={styles.sub}>학급별 · 학생별 제출/승인/피드백/최종 배포</div>
+          <div className={styles.sub}>실시간 모니터링 · 승인/거부 · 피드백 · 최종 배포</div>
         </div>
       </div>
 
       <div className={styles.grid}>
+        {/* ── 좌측: 학생 목록 ── */}
         <div className={styles.panel}>
           <div className={styles.panelTitle}>학생 현황</div>
           {state.subs.length === 0 ? (
             <div className={styles.empty}>
-              아직 학생 제출 데이터가 없습니다. 학생이 공유 링크로 접속해 작성/제출하면 여기에서 확인할 수 있습니다.
+              아직 학생 제출 데이터가 없습니다.
             </div>
           ) : (
             <div className={styles.list}>
@@ -346,12 +455,9 @@ export default function TeacherAssignmentPage() {
                 <div key={className} className={styles.classGroup}>
                   <div className={styles.classGroupTitle}>{className}</div>
                   {subs.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
+                    <button key={s.id} type="button"
                       className={[styles.row, selectedSubmissionId === s.id ? styles.rowActive : ""].join(" ")}
-                      onClick={() => setSelectedSubmissionId(s.id)}
-                    >
+                      onClick={() => setSelectedSubmissionId(s.id)}>
                       <div className={styles.rowMain}>
                         <div className={styles.no}>{s.studentNo}</div>
                         <div className={styles.meta}>
@@ -369,6 +475,7 @@ export default function TeacherAssignmentPage() {
           )}
         </div>
 
+        {/* ── 우측: 학생 대시보드 ── */}
         <div className={styles.panel}>
           <div className={styles.panelTitle}>학생 대시보드</div>
           {!selected ? (
@@ -377,82 +484,69 @@ export default function TeacherAssignmentPage() {
             <>
               <div className={styles.dashTabs}>
                 {(["outline", "draft", "revise", "final"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
+                  <button key={t} type="button"
                     className={[styles.dashTab, dashTab === t ? styles.dashTabOn : ""].join(" ")}
-                    onClick={() => setDashTab(t)}
-                  >
-                    {t === "outline"
-                      ? "개요쓰기"
-                      : t === "draft"
-                        ? "초고쓰기"
-                        : t === "revise"
-                          ? "고쳐쓰기"
-                          : "최종 대시보드"}
+                    onClick={() => setDashTab(t)}>
+                    {t === "outline" ? "개요쓰기" : t === "draft" ? "초고쓰기" : t === "revise" ? "고쳐쓰기" : "최종 대시보드"}
                   </button>
                 ))}
               </div>
+
+              {/* GRASP 정보 표시 */}
+              {selected.grasp ? (
+                <div style={{ marginBottom: 12 }}>
+                  <GraspSummary grasp={selected.grasp} />
+                </div>
+              ) : null}
 
               {dashTab !== "final" ? (
                 <>
                   <div className={styles.block}>
                     <div className={styles.blockTitle}>
                       현재 단계: {stageText(currentStage(selected.sub))}
-                      <button
-                        type="button"
-                        className={styles.approveBtn}
-                        style={{ marginLeft: 10 }}
-                        disabled={dashTab !== currentStage(selected.sub)}
-                        onClick={() => approveStage(selected.sub.id, currentStage(selected.sub))}
-                        title={
-                          dashTab !== currentStage(selected.sub)
-                            ? "현재 단계에서만 승인할 수 있습니다."
-                            : dashTab === "revise"
-                              ? "최종 승인(고쳐쓰기 승인)"
-                              : "승인"
-                        }
-                      >
-                        {dashTab === "outline"
-                          ? "개요 승인"
-                          : dashTab === "draft"
-                            ? "초고 승인"
-                            : "최종 승인"}
-                      </button>
-                      {dashTab === "revise" && selected.sub.finalApprovedAt ? (
-                        <button
-                          type="button"
-                          className={styles.smallBtn}
-                          onClick={() => cancelFinalApproval(selected.sub.id)}
-                          title="최종 승인을 취소하고, 학생이 다시 고쳐쓰기를 진행할 수 있게 합니다."
-                        >
-                          승인 취소
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button type="button" className={styles.approveBtn} style={{ marginLeft: 10 }}
+                          disabled={dashTab !== currentStage(selected.sub)}
+                          onClick={() => approveStage(selected.sub.id, currentStage(selected.sub))}
+                          title={dashTab !== currentStage(selected.sub) ? "현재 단계에서만 승인할 수 있습니다." : undefined}>
+                          {dashTab === "outline" ? "개요 승인" : dashTab === "draft" ? "초고 승인" : "최종 승인"}
                         </button>
-                      ) : null}
+                        {/* 거부 버튼 */}
+                        {dashTab === currentStage(selected.sub) ? (
+                          <button type="button" className={styles.smallBtn}
+                            style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}
+                            onClick={() => openRejectModal(dashTab as Stage)}>
+                            거부
+                          </button>
+                        ) : null}
+                        {dashTab === "revise" && selected.sub.finalApprovedAt ? (
+                          <button type="button" className={styles.smallBtn}
+                            onClick={() => cancelFinalApproval(selected.sub.id)}>
+                            승인 취소
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
 
+                  {/* 학생 글 실시간 열람 */}
                   <div className={styles.block}>
-                    <div className={styles.blockTitle}>학생 글 (드래그하여 아래 피드백 영역에 놓기)</div>
+                    <div className={styles.blockTitle}>학생 글 (실시간, 드래그하여 피드백)</div>
                     <div
                       id="select-box"
                       className={styles.selectBox}
                       style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}
                       onDragStart={onDragStartSelect}
                     >
-                      {textForStage(selected.sub, dashTab as Stage)}
+                      {textForStage(selected.sub, dashTab as Stage) || "(아직 작성된 내용이 없습니다)"}
                     </div>
                     <div className={styles.dim}>
-                      글에서 드래그한 뒤 아래 점선 영역에 놓으면 인용 박스로 고정됩니다. 메모는 별도 입력란에만
-                      적습니다.
+                      글에서 드래그한 뒤 아래 점선 영역에 놓으면 인용 박스로 고정됩니다.
                     </div>
                   </div>
 
-                  <div
-                    className={styles.feedbackDropZone}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={onDropFeedback}
-                  >
+                  {/* 피드백(메모) 영역 */}
+                  <div className={styles.feedbackDropZone} onDragOver={(e) => e.preventDefault()} onDrop={onDropFeedback}>
                     <div className={styles.blockTitle}>피드백(메모)</div>
                     {dropQuote ? (
                       <div className={styles.quoteBox}>
@@ -462,15 +556,24 @@ export default function TeacherAssignmentPage() {
                     ) : (
                       <div className={styles.dropHint}>여기로 글을 드래그하면 인용 박스가 표시됩니다.</div>
                     )}
-                    <textarea
-                      className={styles.textarea}
-                      value={noteText}
-                      onChange={(e) => setNoteText(e.target.value)}
-                      placeholder="피드백 내용만 입력하세요. (인용과 섞이지 않습니다)"
-                    />
-                    <button type="button" className={styles.smallBtn} onClick={addNote}>
-                      메모 저장
-                    </button>
+
+                    {/* 피드백 템플릿 */}
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#64748b", marginBottom: 4 }}>템플릿</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {FEEDBACK_TEMPLATES.map((t, i) => (
+                          <button key={i} type="button" className={styles.smallBtn}
+                            style={{ height: 26, fontSize: 10, padding: "0 8px" }}
+                            onClick={() => setNoteText((prev) => prev ? `${prev}\n${t}` : t)}>
+                            {t.slice(0, 25)}...
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <textarea className={styles.textarea} value={noteText} onChange={(e) => setNoteText(e.target.value)}
+                      placeholder="피드백 내용만 입력하세요." />
+                    <button type="button" className={styles.smallBtn} onClick={addNote}>메모 저장</button>
                     {notesForTab.length ? (
                       <div className={styles.noteList}>
                         {notesForTab.map((n) => (
@@ -485,8 +588,54 @@ export default function TeacherAssignmentPage() {
                     )}
                   </div>
 
+                  {/* 교사 실시간 코멘트 */}
                   <div className={styles.block}>
-                    <div className={styles.blockTitle}>AI 대화 로그</div>
+                    <div className={styles.blockTitle}>실시간 코멘트 전송</div>
+                    <div className={styles.dim} style={{ marginBottom: 6 }}>
+                      학생 화면에 실시간 알림으로 전달됩니다.
+                    </div>
+                    <textarea className={styles.textarea} value={commentText} onChange={(e) => setCommentText(e.target.value)}
+                      placeholder="학생에게 전달할 코멘트를 입력하세요..." style={{ minHeight: 60 }} />
+                    <button type="button" className={styles.smallBtn} onClick={sendComment} disabled={!commentText.trim()}>
+                      코멘트 전송
+                    </button>
+                    {selected.comments.length > 0 ? (
+                      <div className={styles.noteList}>
+                        {selected.comments.slice(0, 5).map((c) => (
+                          <div key={c.id} className={styles.noteItem}>
+                            <div style={{ fontSize: 10, color: "#64748b" }}>
+                              [{stageText(c.stage as Stage)}] {new Date(c.createdAt).toLocaleString("ko-KR")}
+                              {c.readAt ? " (읽음)" : ""}
+                            </div>
+                            <div className={styles.noteText}>{c.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* AI 활용 이력 */}
+                  <div className={styles.block}>
+                    <div className={styles.blockTitle}>AI 활용 이력</div>
+                    {selected.aiInteractions.length > 0 ? (
+                      <div className={styles.log}>
+                        {selected.aiInteractions.slice(-15).map((i) => (
+                          <div key={i.id} className={styles.logRow}>
+                            <span className={styles.role}>{i.type}</span>
+                            <span className={styles.logText}>
+                              {i.action === "accepted" ? "[수용]" : i.action === "modified" ? "[수정]" : "[거부]"} {i.response.slice(0, 100)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={styles.dim}>AI 협력 활용 기록이 없습니다.</div>
+                    )}
+                  </div>
+
+                  {/* AI 대화 로그 */}
+                  <div className={styles.block}>
+                    <div className={styles.blockTitle}>AI 튜터 대화 로그</div>
                     {selected.logs.length ? (
                       <div className={styles.log}>
                         {selected.logs.slice(-30).map((l) => (
@@ -497,7 +646,7 @@ export default function TeacherAssignmentPage() {
                         ))}
                       </div>
                     ) : (
-                      <div className={styles.dim}>AI 사용 기록이 없습니다.</div>
+                      <div className={styles.dim}>AI 튜터 사용 기록이 없습니다.</div>
                     )}
                   </div>
                 </>
@@ -550,6 +699,10 @@ function FinalDashboardPanel({
     notes: FeedbackNote[];
     logs: AiLog[];
     scoreRow: Score | null;
+    grasp: Grasp | null;
+    comments: TeacherComment[];
+    transitions: StepTransition[];
+    aiInteractions: AiInteraction[];
   };
   dbBump: number;
   generalFeedback: string;
@@ -637,49 +790,28 @@ function FinalDashboardPanel({
       <div className={styles.partialRow}>
         <label>
           개요 점수
-          <input
-            type="number"
-            className={styles.scoreInput}
-            value={outlinePart}
-            onChange={(e) => setOutlinePart(e.target.value === "" ? "" : Number(e.target.value))}
-          />
+          <input type="number" className={styles.scoreInput} value={outlinePart}
+            onChange={(e) => setOutlinePart(e.target.value === "" ? "" : Number(e.target.value))} />
         </label>
         <label>
           초고 점수
-          <input
-            type="number"
-            className={styles.scoreInput}
-            value={draftPart}
-            onChange={(e) => setDraftPart(e.target.value === "" ? "" : Number(e.target.value))}
-          />
+          <input type="number" className={styles.scoreInput} value={draftPart}
+            onChange={(e) => setDraftPart(e.target.value === "" ? "" : Number(e.target.value))} />
         </label>
         <label>
           고쳐쓰기 점수
-          <input
-            type="number"
-            className={styles.scoreInput}
-            value={revisePart}
-            onChange={(e) => setRevisePart(e.target.value === "" ? "" : Number(e.target.value))}
-          />
+          <input type="number" className={styles.scoreInput} value={revisePart}
+            onChange={(e) => setRevisePart(e.target.value === "" ? "" : Number(e.target.value))} />
         </label>
       </div>
       <div className={styles.totalLine}>부분 합계: <b>{total}</b></div>
 
-      <textarea
-        className={styles.textarea}
-        value={generalFeedback}
-        onChange={(e) => setGeneralFeedback(e.target.value)}
-        placeholder="총평"
-      />
+      <textarea className={styles.textarea} value={generalFeedback} onChange={(e) => setGeneralFeedback(e.target.value)} placeholder="총평" />
       <div className={styles.scoreRow}>
         <label className={styles.scoreLabel}>
           통합 점수(표시용)
-          <input
-            className={styles.scoreInput}
-            type="number"
-            value={score}
-            onChange={(e) => setScore(e.target.value === "" ? "" : Number(e.target.value))}
-          />
+          <input className={styles.scoreInput} type="number" value={score}
+            onChange={(e) => setScore(e.target.value === "" ? "" : Number(e.target.value))} />
         </label>
       </div>
 
@@ -693,12 +825,8 @@ function FinalDashboardPanel({
       ) : null}
 
       <div className={styles.finalActions}>
-        <button type="button" className={styles.smallBtn} onClick={saveScore}>
-          저장하기
-        </button>
-        <button type="button" className={styles.publishBtn} onClick={publishFinalReport}>
-          저장 후 배포하기
-        </button>
+        <button type="button" className={styles.smallBtn} onClick={saveScore}>저장하기</button>
+        <button type="button" className={styles.publishBtn} onClick={publishFinalReport}>저장 후 배포하기</button>
       </div>
     </div>
   );

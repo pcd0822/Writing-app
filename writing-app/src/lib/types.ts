@@ -69,6 +69,56 @@ export type ShareLink = z.infer<typeof ShareLinkSchema>;
 export const StageSchema = z.enum(["outline", "draft", "revise"]);
 export type Stage = z.infer<typeof StageSchema>;
 
+// ── GRASP 맥락 설계 ────────────────────────────────────────────
+export const GraspProductSchema = z.enum(["proposal", "report", "column", "essay", "other"]);
+export type GraspProduct = z.infer<typeof GraspProductSchema>;
+
+export const GraspSchema = z.object({
+  goal: z.string().default(""),
+  role: z.string().default(""),
+  audience: z.string().default(""),
+  situation: z.string().default(""),
+  product: GraspProductSchema.default("essay"),
+  standards: z.array(z.string()).default([]),
+});
+export type Grasp = z.infer<typeof GraspSchema>;
+
+// ── 단계 이동 이력 ──────────────────────────────────────────────
+export const StepTransitionSchema = z.object({
+  id: z.string().min(1),
+  submissionId: z.string().min(1),
+  studentNo: z.string().min(1),
+  fromStep: z.number().int(),
+  toStep: z.number().int(),
+  timestamp: z.number().int(),
+  reason: z.enum(["initial_progress", "revision_back", "revision_forward"]),
+});
+export type StepTransition = z.infer<typeof StepTransitionSchema>;
+
+// ── AI 협력 활용 이력 ───────────────────────────────────────────
+export const AiInteractionSchema = z.object({
+  id: z.string().min(1),
+  submissionId: z.string().min(1),
+  timestamp: z.number().int(),
+  step: z.number().int(),
+  type: z.enum(["continue", "rephrase", "argument", "audience", "structure", "tutor"]),
+  prompt: z.string().default(""),
+  response: z.string().default(""),
+  action: z.enum(["accepted", "modified", "rejected"]).default("rejected"),
+});
+export type AiInteraction = z.infer<typeof AiInteractionSchema>;
+
+// ── 교사 실시간 피드백 코멘트 ───────────────────────────────────
+export const TeacherCommentSchema = z.object({
+  id: z.string().min(1),
+  submissionId: z.string().min(1),
+  stage: StageSchema,
+  createdAt: z.number().int(),
+  text: z.string().min(1),
+  readAt: z.number().int().nullable().default(null),
+});
+export type TeacherComment = z.infer<typeof TeacherCommentSchema>;
+
 export const SubmissionSchema = z.object({
   id: z.string().min(1),
   assignmentId: z.string().min(1),
@@ -90,6 +140,14 @@ export const SubmissionSchema = z.object({
   finalReportPublishedAt: z.number().int().nullable().optional().default(null),
   /** 교사가 저장한 최종 대시보드 스냅샷(JSON 문자열) */
   finalReportSnapshot: z.string().optional().default(""),
+  /** GRASP 맥락 설계 데이터 (JSON 문자열) */
+  graspData: z.string().optional().default(""),
+  /** 교사 승인 거부 사유 (단계별) */
+  outlineRejectReason: z.string().optional().default(""),
+  draftRejectReason: z.string().optional().default(""),
+  reviseRejectReason: z.string().optional().default(""),
+  /** 현재 활성 단계 번호 (0=grasp미완, 1=outline, 2=draft, 3=revise) */
+  currentStep: z.number().int().optional().default(1),
 });
 export type Submission = z.infer<typeof SubmissionSchema>;
 
@@ -124,11 +182,13 @@ export const ScoreSchema = z.object({
   outlineScore: z.number().int().nullable().optional().default(null),
   draftScore: z.number().int().nullable().optional().default(null),
   reviseScore: z.number().int().nullable().optional().default(null),
+  /** 최종 확정 여부 */
+  isFinalized: z.boolean().optional().default(false),
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
 export const TeacherDbSchema = z.object({
-  version: z.literal(4),
+  version: z.literal(5),
   /** 구글 시트 v2 분산 저장 시 메타에만 사용 (클라이언트 로직에서는 무시 가능) */
   sheetDbVersion: z.number().optional(),
   classes: z.array(ClassSchema),
@@ -139,6 +199,9 @@ export const TeacherDbSchema = z.object({
   feedbackNotes: z.array(FeedbackNoteSchema),
   aiLogs: z.array(AiLogSchema),
   scores: z.array(ScoreSchema),
+  stepTransitions: z.array(StepTransitionSchema).default([]),
+  aiInteractions: z.array(AiInteractionSchema).default([]),
+  teacherComments: z.array(TeacherCommentSchema).default([]),
 });
 export type TeacherDb = z.infer<typeof TeacherDbSchema>;
 

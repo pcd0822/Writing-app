@@ -1,0 +1,176 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.title {
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.desc {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-weight: 900;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.label {
+  font-weight: 750;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.hint {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 10px 12px;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+}
+
+.textarea {
+  composes: input;
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.select {
+  composes: input;
+  cursor: pointer;
+}
+
+.checkboxGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checkItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 12px;
+  color: #334155;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.checkItem:hover {
+  background: #f1f5f9;
+}
+
+.checkItemOn {
+  border-color: #38bdf8;
+  background: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.customStandardRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.customInput {
+  composes: input;
+  flex: 1;
+}
+
+.addBtn {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #38bdf8;
+  background: #7dd3fc;
+  color: #0c4a6e;
+  font-weight: 750;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.08s ease, background-color 0.12s ease;
+}
+
+.addBtn:hover {
+  background: #38bdf8;
+}
+
+.addBtn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.saveBtn {
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid #38bdf8;
+  background: #7dd3fc;
+  color: #0c4a6e;
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.08s ease, background-color 0.12s ease;
+}
+
+.saveBtn:hover:not(:disabled) {
+  background: #38bdf8;
+}
+
+.saveBtn:active:not(:disabled) {
+  transform: translateY(2px) scale(0.98);
+}
+
+.saveBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

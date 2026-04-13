@@ -1,0 +1,83 @@
+.wrap {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.title {
+  font-weight: 850;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: #0c4a6e;
+  margin-bottom: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.itemFull {
+  composes: item;
+  grid-column: 1 / -1;
+}
+
+.key {
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.val {
+  font-size: 12px;
+  color: #0f172a;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.editBtn {
+  margin-top: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.08s ease;
+}
+
+.editBtn:hover {
+  background: #f8fafc;
+}
+
+.editBtn:active {
+  transform: translateY(1px) scale(0.98);
+}

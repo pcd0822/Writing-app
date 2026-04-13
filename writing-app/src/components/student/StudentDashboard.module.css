@@ -1,0 +1,296 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.section {
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.sectionTitle {
+  font-weight: 850;
+  font-size: 13px;
+  color: #0f172a;
+  margin-bottom: 10px;
+  letter-spacing: -0.02em;
+}
+
+/* ── Flow Chart ──────────────────── */
+.flowChart {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+.flowNode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 2px solid #cbd5e1;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 750;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.flowNodeActive {
+  border-color: #38bdf8;
+  background: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.flowNodeDone {
+  border-color: #86efac;
+  background: #ecfdf5;
+  color: #14532d;
+}
+
+.flowArrow {
+  font-size: 14px;
+  color: #94a3b8;
+  padding: 0 2px;
+}
+
+.flowEdge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 10px;
+  color: #64748b;
+  gap: 2px;
+}
+
+.flowEdgeCount {
+  font-weight: 800;
+  font-size: 11px;
+  color: #0c4a6e;
+}
+
+/* ── Timeline ────────────────────── */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.timelineItem {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.timelineTime {
+  font-family: var(--font-geist-mono);
+  color: #64748b;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.timelineEvent {
+  color: #0f172a;
+}
+
+/* ── Diff View ───────────────────── */
+.diffTabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.diffTab {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.diffTabOn {
+  border-color: #38bdf8;
+  background: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.diffContainer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.diffCol {
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.diffLabel {
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.diffText {
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  color: #0f172a;
+}
+
+/* ── Metrics ─────────────────────── */
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.metricCard {
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.metricLabel {
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.metricValues {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.metricItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.metricNum {
+  font-size: 16px;
+  font-weight: 900;
+  color: #0c4a6e;
+}
+
+.metricSub {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+/* ── Growth Summary ──────────────── */
+.growthCard {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #f0f9ff, #ecfdf5);
+  padding: 12px;
+}
+
+.growthText {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #0f172a;
+  white-space: pre-wrap;
+}
+
+/* ── AI Usage ────────────────────── */
+.aiUsageGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.aiUsageItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 11px;
+}
+
+.aiUsageLabel {
+  color: #334155;
+  font-weight: 700;
+}
+
+.aiUsageCount {
+  font-weight: 800;
+  color: #0c4a6e;
+}
+
+.dim {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.generateBtn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid #38bdf8;
+  background: #7dd3fc;
+  color: #0c4a6e;
+  font-weight: 750;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.08s ease, background-color 0.12s ease;
+}
+
+.generateBtn:hover:not(:disabled) {
+  background: #38bdf8;
+}
+
+.generateBtn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+}
+
+.generateBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .metricsGrid {
+    grid-template-columns: 1fr;
+  }
+  .diffContainer {
+    grid-template-columns: 1fr;
+  }
+  .aiUsageGrid {
+    grid-template-columns: 1fr;
+  }
+}
