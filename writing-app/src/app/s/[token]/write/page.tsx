@@ -7,6 +7,7 @@ import styles from "./write.module.css";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { AiCollaborationPanel } from "@/components/student/AiCollaborationPanel";
+import { RevisionGuide } from "@/components/student/RevisionGuide";
 import { GraspForm } from "@/components/student/GraspForm";
 import { GraspSummary } from "@/components/student/GraspSummary";
 import { StudentDashboard } from "@/components/student/StudentDashboard";
@@ -922,32 +923,32 @@ export default function WritePage() {
               </div>
             ) : null}
 
-            {tab === "revise" && state.notes.length ? (
-              <div className={styles.noteBox}>
-                <div className={styles.noteTitle}>교사 메모(첨삭)</div>
-                <div className={styles.quote} style={{ marginBottom: 10 }}>
-                  아래 "초고 하이라이트"에서 메모가 달린 구간이 표시됩니다.
-                </div>
-                <div className={styles.noteBox} style={{ marginBottom: 10 }}>
-                  <div className={styles.noteTitle}>초고 하이라이트</div>
-                  <div className={styles.quote}>
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
-                      {renderFeedbackInText(draftText || "", "draft")}
+            {tab === "revise" ? (
+              <>
+                {/* 초고 하이라이트 (피드백 구간 표시) */}
+                {state.notes.length > 0 ? (
+                  <div className={styles.noteBox} style={{ marginBottom: 10 }}>
+                    <div className={styles.noteTitle}>초고 하이라이트</div>
+                    <div className={styles.quote}>
+                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
+                        {renderFeedbackInText(draftText || "", "draft")}
+                      </div>
                     </div>
                   </div>
-                </div>
-                {state.notes
-                  .filter((n) => n.stage === "draft" || n.stage === "revise")
-                  .map((n) => (
-                    <div key={n.id} className={styles.noteItem}>
-                      <div className={styles.quote}>{n.anchorText}</div>
-                      <div className={styles.teacherText}>{n.teacherText}</div>
-                      <button className={styles.smallBtn} onClick={() => onResolveNote(n.id)}>
-                        첨삭 완료
-                      </button>
-                    </div>
-                  ))}
-              </div>
+                ) : null}
+
+                {/* 고쳐쓰기 가이드: 체크박스 피드백 + AI 수정 전략 + 비교 점검 */}
+                <RevisionGuide
+                  submissionId={state.submission.id}
+                  notes={state.notes}
+                  draftText={draftText}
+                  reviseText={reviseText}
+                  grasp={graspData}
+                  spreadsheetId={effectiveSheetId || undefined}
+                  onResolveNote={onResolveNote}
+                  onBump={bumpDb}
+                />
+              </>
             ) : null}
 
             {state.score?.teacherSummary ? (

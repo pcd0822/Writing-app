@@ -125,6 +125,55 @@ ${fullText.slice(0, 2000)}
 ${COMMON_RULES}
 `.trim(),
 
+  /** 고쳐쓰기 — 미해결 피드백 요약 */
+  revisionFeedbackSummary: (
+    feedbackItems: { anchorText: string; teacherText: string }[],
+    grasp: Grasp | null,
+  ) => `
+${graspContext(grasp)}
+
+[미해결 교사 피드백 목록]
+${feedbackItems.map((f, i) => `${i + 1}. 구간: "${f.anchorText.slice(0, 200)}"\n   피드백: ${f.teacherText}`).join("\n")}
+
+[요청] 위 미해결 피드백들을 학생이 수정 전략을 세울 수 있도록 요약하고,
+각 피드백에 대해 "이 피드백을 반영하면 글이 어떻게 달라질까요?" 또는
+"이 피드백이 논거의 타당성과 어떻게 연결될까요?" 같은 수정 전략 질문을 하나씩 제시해주세요.
+학생이 어디서부터 수정을 시작하면 좋을지 우선순위도 짧게 안내하세요.
+
+${COMMON_RULES}
+`.trim(),
+
+  /** 고쳐쓰기 — 수정 전후 비교 점검 질문 */
+  revisionCompare: (
+    feedbackText: string,
+    anchorText: string,
+    draftText: string,
+    reviseText: string,
+    grasp: Grasp | null,
+  ) => `
+${graspContext(grasp)}
+
+[교사 피드백]
+${feedbackText}
+
+[피드백 대상 구간 (초고)]
+"${anchorText.slice(0, 500)}"
+
+[초고 전문 (수정 전)]
+${draftText.slice(0, 1500)}
+
+[고쳐쓰기 전문 (수정 후)]
+${reviseText.slice(0, 1500)}
+
+[요청] 학생이 위 교사 피드백을 반영하여 글을 수정했습니다.
+수정 전 문장과 비교하여 어떤 점이 달라졌는지 학생이 스스로 점검할 수 있는 질문을 1~2개 제시해주세요.
+"수정 전에는 ~였는데, 지금은 어떻게 바뀌었나요?" 또는
+"이 수정이 독자에게 어떤 효과를 줄 수 있을까요?" 형태로 질문하세요.
+피드백이 충분히 반영되었다면 격려와 함께 다음으로 넘어가도 좋다고 안내하세요.
+
+${COMMON_RULES}
+`.trim(),
+
   /** AI 튜터 트리거 — 단계 간 연결성 피드백 */
   tutorFeedback: (
     currentStep: string,

@@ -1,0 +1,231 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.emptyState {
+  font-size: 13px;
+  color: #14532d;
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  border-radius: 12px;
+  padding: 14px 16px;
+  line-height: 1.55;
+  font-weight: 700;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headerTitle {
+  font-weight: 850;
+  font-size: 14px;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progressBar {
+  width: 100px;
+  height: 8px;
+  border-radius: 6px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #38bdf8, #0ea5e9);
+  transition: width 0.3s ease;
+}
+
+.progressText {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
+}
+
+/* 요약 */
+.summaryBox {
+  border-radius: 12px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  padding: 12px 14px;
+}
+
+.summaryLabel {
+  font-weight: 800;
+  font-size: 12px;
+  color: #3730a3;
+  margin-bottom: 6px;
+}
+
+.summaryContent {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #1e293b;
+  white-space: pre-wrap;
+}
+
+.loadingText {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* 체크리스트 */
+.checklistSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionLabel {
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+  letter-spacing: 0.02em;
+}
+
+.checkItem {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkRow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.checkbox {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 2px solid #cbd5e1;
+  background: #ffffff;
+  color: transparent;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  margin-top: 2px;
+}
+
+.checkbox:hover:not(:disabled) {
+  border-color: #38bdf8;
+  background: #f0f9ff;
+}
+
+.checkboxChecked {
+  border-color: #0ea5e9;
+  background: #0ea5e9;
+  color: #ffffff;
+  cursor: default;
+}
+
+.checkbox:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.checkContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.anchorQuote {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.45;
+  border-left: 3px solid #fde68a;
+  padding-left: 8px;
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+  max-height: 60px;
+  overflow: auto;
+}
+
+.teacherFeedback {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #0f172a;
+  white-space: pre-wrap;
+}
+
+/* 비교 점검 */
+.compareBox {
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  padding: 10px 12px;
+  margin-left: 36px;
+}
+
+.compareLabel {
+  font-weight: 800;
+  font-size: 11px;
+  color: #1e40af;
+  margin-bottom: 4px;
+}
+
+.compareContent {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1e293b;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.resolveBtn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid #86efac;
+  background: #ecfdf5;
+  color: #14532d;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform 0.08s ease, background-color 0.12s ease;
+}
+
+.resolveBtn:hover {
+  background: #d1fae5;
+}
+
+.resolveBtn:active {
+  transform: translateY(1px) scale(0.98);
+  background: #a7f3d0;
+}
+
+.resolvedBadge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #14532d;
+  background: #d1fae5;
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 6px;
+}
