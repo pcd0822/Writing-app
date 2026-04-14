@@ -537,6 +537,24 @@
   transform: translateY(1px);
 }
 
+.statsBar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 11px;
+  color: #475569;
+  margin-top: 6px;
+}
+
+.statsBar b {
+  color: #0f172a;
+  font-weight: 800;
+}
+
 @media (max-width: 980px) {
   .grid {
     grid-template-columns: 1fr;

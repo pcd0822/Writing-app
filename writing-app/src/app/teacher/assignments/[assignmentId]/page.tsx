@@ -492,7 +492,11 @@ export default function TeacherAssignmentPage() {
                           <span>고쳐쓰기: {stageStatus(s, "revise")}</span>
                         </div>
                       </div>
-                      <div className={styles.ai}>AI {state.aiCountBySubmissionId.get(s.id) || 0}</div>
+                      <div className={styles.ai}>
+                        AI {state.aiCountBySubmissionId.get(s.id) || 0}
+                        {" · "}
+                        {(s.outlineText + s.draftText + s.reviseText).replace(/\s/g, "").length}자
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -575,6 +579,19 @@ export default function TeacherAssignmentPage() {
                     >
                       {textForStage(selected.sub, dashTab as Stage) || "(아직 작성된 내용이 없습니다)"}
                     </div>
+                    {(() => {
+                      const text = textForStage(selected.sub, dashTab as Stage);
+                      const charsWithSpaces = text.length;
+                      const charsNoSpaces = text.replace(/\s/g, "").length;
+                      const paragraphs = text.trim() ? text.trim().split(/\n+/).length : 0;
+                      return (
+                        <div className={styles.statsBar}>
+                          <span>글자수(공백포함): <b>{charsWithSpaces}</b></span>
+                          <span>글자수(공백제외): <b>{charsNoSpaces}</b></span>
+                          <span>문단: <b>{paragraphs}</b></span>
+                        </div>
+                      );
+                    })()}
                     <div className={styles.dim}>
                       글에서 드래그한 뒤 아래 점선 영역에 놓으면 인용 박스로 고정됩니다.
                     </div>

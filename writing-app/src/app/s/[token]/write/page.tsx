@@ -6,8 +6,7 @@ import ReactMarkdown from "react-markdown";
 import styles from "./write.module.css";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { AiTutor } from "@/components/student/AiTutor";
-import { AiWritingPanel } from "@/components/student/AiWritingPanel";
+import { AiCollaborationPanel } from "@/components/student/AiCollaborationPanel";
 import { GraspForm } from "@/components/student/GraspForm";
 import { GraspSummary } from "@/components/student/GraspSummary";
 import { StudentDashboard } from "@/components/student/StudentDashboard";
@@ -110,7 +109,7 @@ export default function WritePage() {
     x: number;
     y: number;
   } | null>(null);
-  const [aiReference, setAiReference] = useState<string | null>(null);
+  const [aiSelectedText, setAiSelectedText] = useState("");
   const [dbBump, setDbBump] = useState(0);
   const [stageEditUnlocked, setStageEditUnlocked] = useState<EditUnlock>({
     outline: false,
@@ -121,14 +120,14 @@ export default function WritePage() {
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [feedbackPanelTab, setFeedbackPanelTab] = useState<FeedbackPanelTab>("outline");
   const [feedbackNoteModalId, setFeedbackNoteModalId] = useState<string | null>(null);
-  const [tutorWidth, setTutorWidth] = useState(320);
-  const [tutorHeight, setTutorHeight] = useState(520);
+  const [tutorWidth, setTutorWidth] = useState(400);
+  const [tutorHeight, setTutorHeight] = useState(680);
 
   // 새 상태들
   const [viewMode, setViewMode] = useState<ViewMode>("write");
   const [showGraspForm, setShowGraspForm] = useState(false);
   const [graspData, setGraspData] = useState<Grasp | null>(null);
-  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(true);
   const [tutorTriggerLoading, setTutorTriggerLoading] = useState(false);
   const [tutorTriggerResponse, setTutorTriggerResponse] = useState<string | null>(null);
 
@@ -222,13 +221,13 @@ export default function WritePage() {
       const h = localStorage.getItem(TUTOR_H_KEY);
       if (w) {
         const n = parseInt(w, 10);
-        if (Number.isFinite(n)) setTutorWidth(Math.min(560, Math.max(240, n)));
+        if (Number.isFinite(n)) setTutorWidth(Math.min(700, Math.max(300, n)));
       }
       if (h) {
         const n = parseInt(h, 10);
         if (Number.isFinite(n)) setTutorHeight(Math.min(window.innerHeight - 32, Math.max(280, n)));
       } else {
-        setTutorHeight(Math.min(560, window.innerHeight - 32));
+        setTutorHeight(Math.min(780, window.innerHeight - 32));
       }
     } catch { /* ignore */ }
   }, []);
@@ -261,7 +260,7 @@ export default function WritePage() {
       const startW = tutorWidth;
       const onMove = (ev: MouseEvent) => {
         const delta = startX - ev.clientX;
-        setTutorWidth(Math.min(560, Math.max(240, startW + delta)));
+        setTutorWidth(Math.min(700, Math.max(300, startW + delta)));
       };
       const onUp = () => {
         document.body.style.cursor = "";
@@ -420,6 +419,7 @@ export default function WritePage() {
     const s = state.submission;
     const sub = stageSubmitted(s, stage);
     const ap = stageApproved(s, stage);
+    if (ap && stageEditUnlocked[stage]) return { label: "승인 후 수정중", className: styles.statusPillEditing };
     if (ap) return { label: "승인완료", className: styles.statusPillDone };
     if (sub && stageEditUnlocked[stage]) return { label: "수정중", className: styles.statusPillEditing };
     if (sub) return { label: "제출완료", className: styles.statusPillDone };
@@ -478,7 +478,8 @@ export default function WritePage() {
   function editorLocked(stage: Stage) {
     if (!state.ok) return true;
     const s = state.submission;
-    if (stageApproved(s, stage)) return true;
+    // 승인된 단계라도 수정하기를 누르면 편집 가능
+    if (stageApproved(s, stage)) return !stageEditUnlocked[stage];
     const sub = stageSubmitted(s, stage);
     if (!sub) return false;
     return !stageEditUnlocked[stage];
@@ -502,9 +503,11 @@ export default function WritePage() {
     setIsSubmitting(true);
     try {
       const patch: Partial<Submission> =
-        stage === "outline" ? { outlineSubmittedAt: Date.now() } :
-        stage === "draft" ? { draftSubmittedAt: Date.now() } :
-        { reviseSubmittedAt: Date.now() };
+        stage === "outline"
+          ? { outlineSubmittedAt: Date.now(), outlineApprovedAt: null }
+          : stage === "draft"
+            ? { draftSubmittedAt: Date.now(), draftApprovedAt: null }
+            : { reviseSubmittedAt: Date.now(), reviseApprovedAt: null };
       await updateSubmissionWithRemoteMerge(state.submission.id, patch, sheetSaveOpts);
       setStageEditUnlocked((prev) => ({ ...prev, [stage]: false }));
       bumpDb();
@@ -521,7 +524,8 @@ export default function WritePage() {
   function canShowSubmit(stage: Stage) {
     if (!state.ok) return false;
     const s = state.submission;
-    if (stageApproved(s, stage)) return false;
+    // 승인된 단계에서 수정 중이면 재제출 가능
+    if (stageApproved(s, stage)) return stageEditUnlocked[stage];
     const sub = stageSubmitted(s, stage);
     if (!sub) return true;
     return stageEditUnlocked[stage];
@@ -530,8 +534,7 @@ export default function WritePage() {
   function canShowEdit(stage: Stage) {
     if (!state.ok) return false;
     const s = state.submission;
-    if (stageApproved(s, stage)) return false;
-    const sub = stageSubmitted(s, stage);
+    const sub = stageSubmitted(s, stage) || stageApproved(s, stage);
     return sub && !stageEditUnlocked[stage];
   }
 
@@ -590,7 +593,6 @@ export default function WritePage() {
     tab === "draft" ? state.submission.draftRejectReason :
     state.submission.reviseRejectReason;
 
-  const contextHint = `${state.assignment.title} / ${stageLabel(tab)} / 학생 ${studentNo}`;
   const locked = editorLocked(tab);
 
   function onEditorMouseUp(e: React.MouseEvent<HTMLTextAreaElement>) {
@@ -606,7 +608,8 @@ export default function WritePage() {
 
   function sendSelectionToAi() {
     if (!selection) return;
-    setAiReference(selection.text);
+    setAiSelectedText(selection.text);
+    if (!showAiPanel) setShowAiPanel(true);
     setSelection(null);
   }
 
@@ -685,8 +688,8 @@ export default function WritePage() {
         className={styles.shell}
         style={{
           gridTemplateColumns: showAiPanel
-            ? `minmax(260px, 340px) minmax(0, 1fr) ${tutorWidth}px ${tutorWidth}px`
-            : `minmax(286px, 390px) minmax(0, 1fr) ${tutorWidth}px`,
+            ? `minmax(260px, 340px) minmax(0, 1fr) ${tutorWidth}px`
+            : `minmax(286px, 390px) minmax(0, 1fr)`,
         }}
       >
         {/* ── 좌측 패널: 과제 정보 + GRASP + 피드백 ── */}
@@ -796,7 +799,7 @@ export default function WritePage() {
               <div style={{ display: "flex", gap: 6 }}>
                 <button type="button" className={styles.stepBtnSecondary} style={{ height: 30, fontSize: 11 }}
                   onClick={() => setShowAiPanel(!showAiPanel)}>
-                  {showAiPanel ? "AI 패널 닫기" : "AI 협력 글쓰기"}
+                  {showAiPanel ? "AI 패널 접기" : "AI 협력 글쓰기"}
                 </button>
                 <button type="button" className={styles.stepBtnSecondary} style={{ height: 30, fontSize: 11 }}
                   onClick={() => setViewMode("dashboard")}>
@@ -884,6 +887,21 @@ export default function WritePage() {
               disabled={locked}
             />
 
+            {/* 정량적 지표 */}
+            {(() => {
+              const text = currentText(tab);
+              const charsWithSpaces = text.length;
+              const charsNoSpaces = text.replace(/\s/g, "").length;
+              const paragraphs = text.trim() ? text.trim().split(/\n+/).length : 0;
+              return (
+                <div className={styles.statsBar}>
+                  <span>글자수(띄어쓰기 포함): <b>{charsWithSpaces}</b></span>
+                  <span>글자수(띄어쓰기 제외): <b>{charsNoSpaces}</b></span>
+                  <span>문단 수: <b>{paragraphs}</b></span>
+                </div>
+              );
+            })()}
+
             {selection ? (
               <div className={styles.selectionBar}>
                 <div className={styles.selectionText}>
@@ -951,40 +969,26 @@ export default function WritePage() {
           </div>
         </div>
 
-        {/* ── 우측: AI 튜터 ── */}
-        <div className={styles.tutorCol} style={{ height: tutorHeight }}>
-          <div className={styles.tutorResizeWidth} onMouseDown={onResizeWidthStart} title="너비 조절" />
-          <div className={styles.tutorInner}>
-            <AiTutor
-              submissionId={state.submission.id}
-              stage={tab}
-              contextHint={contextHint}
-              referenceText={aiReference}
-              spreadsheetId={effectiveSheetId || undefined}
-              submission={state.submission}
-              assignment={state.assignment}
-              feedbackNotes={state.notes}
-              grasp={graspData}
-            />
-          </div>
-          <div className={styles.tutorResizeHeight} onMouseDown={onResizeHeightStart} title="높이 조절" />
-        </div>
-
-        {/* ── AI 협력 글쓰기 패널 (토글) ── */}
+        {/* ── 우측: AI 협력 글쓰기 (통합) ── */}
         {showAiPanel ? (
           <div className={styles.tutorCol} style={{ height: tutorHeight }}>
+            <div className={styles.tutorResizeWidth} onMouseDown={onResizeWidthStart} title="너비 조절" />
             <div className={styles.tutorInner}>
-              <AiWritingPanel
+              <AiCollaborationPanel
                 submissionId={state.submission.id}
                 stage={tab}
-                selectedText={selection?.text || ""}
+                selectedText={aiSelectedText || selection?.text || ""}
                 currentText={currentText(tab)}
                 outlineText={outlineText}
                 grasp={graspData}
                 spreadsheetId={effectiveSheetId || undefined}
+                submission={state.submission}
+                assignment={state.assignment}
+                feedbackNotes={state.notes}
                 onBump={bumpDb}
               />
             </div>
+            <div className={styles.tutorResizeHeight} onMouseDown={onResizeHeightStart} title="높이 조절" />
           </div>
         ) : null}
       </div>
