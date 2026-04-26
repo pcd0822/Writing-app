@@ -5,7 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "../providers";
 import { signOutCurrentUser } from "@/lib/auth";
 import { CreateClassModal } from "@/components/teacher/CreateClassModal";
-import { loadTeacherDb, saveTeacherDb } from "@/lib/localDb";
+import {
+  deleteAssignment,
+  deleteClass,
+  loadTeacherDb,
+  saveTeacherDb,
+} from "@/lib/localDb";
 import styles from "./teacher.module.css";
 import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModal";
 import { DriveSetupModal } from "@/components/teacher/DriveSetupModal";
@@ -14,6 +19,11 @@ import { CreateAssignmentModal } from "@/components/teacher/CreateAssignmentModa
 import { ShareAssignmentModal } from "@/components/teacher/ShareAssignmentModal";
 import { StudentCodeExport } from "@/components/teacher/StudentCodeExport";
 import { EditAssignmentModal } from "@/components/teacher/EditAssignmentModal";
+import { Modal } from "@/components/ui/Modal";
+
+type DeleteTarget =
+  | { kind: "class"; id: string; name: string; studentCount: number; submissionCount: number }
+  | { kind: "assignment"; id: string; title: string; submissionCount: number };
 
 export default function TeacherPage() {
   const { user, isLoading } = useAuth();
@@ -27,6 +37,8 @@ export default function TeacherPage() {
   const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [dbVersion, setDbVersion] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) router.replace("/");
@@ -107,6 +119,53 @@ export default function TeacherPage() {
     setDbVersion((v) => v + 1);
   }
 
+  function openDeleteClassConfirm(classId: string) {
+    const fresh = loadTeacherDb();
+    const cls = fresh.classes.find((c) => c.id === classId);
+    if (!cls) return;
+    const submissionCount = fresh.submissions.filter((s) => s.classId === classId).length;
+    setDeleteTarget({
+      kind: "class",
+      id: classId,
+      name: cls.name,
+      studentCount: cls.students.length,
+      submissionCount,
+    });
+  }
+
+  function openDeleteAssignmentConfirm(assignmentId: string) {
+    const fresh = loadTeacherDb();
+    const a = fresh.assignments.find((x) => x.id === assignmentId);
+    if (!a) return;
+    const submissionCount = fresh.submissions.filter((s) => s.assignmentId === assignmentId).length;
+    setDeleteTarget({
+      kind: "assignment",
+      id: assignmentId,
+      title: a.title,
+      submissionCount,
+    });
+  }
+
+  function onConfirmDelete() {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const current = loadTeacherDb();
+      const next =
+        deleteTarget.kind === "class"
+          ? deleteClass(current, deleteTarget.id)
+          : deleteAssignment(current, deleteTarget.id);
+      saveTeacherDb(next);
+      if (deleteTarget.kind === "class" && selectedClassId === deleteTarget.id) {
+        setSelectedClassId(null);
+      }
+      setDeleteTarget(null);
+      refreshDb();
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   if (isLoading) {
     return (
       <div className={styles.page}>로딩 중…</div>
@@ -167,20 +226,31 @@ export default function TeacherPage() {
               ) : (
                 <div className={styles.classes}>
                   {db.classes.map((c) => (
-                    <button
-                      key={c.id}
-                      className={styles.classCard}
-                      onClick={() => setSelectedClassId(c.id)}
-                      title="학급 열기"
-                    >
-                      <div className={styles.className}>{c.name}</div>
-                      <div className={styles.classMeta}>
-                        <span>학생 {c.students.length}명</span>
-                        <span>
-                          {new Date(c.createdAt).toLocaleDateString("ko-KR")}
-                        </span>
-                      </div>
-                    </button>
+                    <div key={c.id} className={styles.classCardWrap}>
+                      <button
+                        type="button"
+                        className={styles.classCard}
+                        onClick={() => setSelectedClassId(c.id)}
+                        title="학급 열기"
+                      >
+                        <div className={styles.className}>{c.name}</div>
+                        <div className={styles.classMeta}>
+                          <span>학생 {c.students.length}명</span>
+                          <span>
+                            {new Date(c.createdAt).toLocaleDateString("ko-KR")}
+                          </span>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.cardDeleteBtn}
+                        onClick={() => openDeleteClassConfirm(c.id)}
+                        title="학급 삭제"
+                        aria-label={`${c.name} 학급 삭제`}
+                      >
+                        🗑
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -239,6 +309,14 @@ export default function TeacherPage() {
                           title="과제 대시보드"
                         >
                           📊 대시보드 보기
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.cardMiniBtnDanger}
+                          onClick={() => openDeleteAssignmentConfirm(a.id)}
+                          title="과제 삭제"
+                        >
+                          🗑 삭제
                         </button>
                       </div>
                     </div>
@@ -312,6 +390,56 @@ export default function TeacherPage() {
         onClose={() => setEditAssignmentId(null)}
         onSaved={refreshDb}
       />
+      <Modal
+        isOpen={!!deleteTarget}
+        onClose={() => { if (!isDeleting) setDeleteTarget(null); }}
+        title={deleteTarget?.kind === "class" ? "학급 삭제" : "과제 삭제"}
+        description="삭제한 데이터는 복구할 수 없습니다. 진행 전에 한 번 더 확인해주세요."
+        size="lg"
+        footer={
+          <div className={styles.confirmFooter}>
+            <button
+              type="button"
+              className={styles.tinyButton}
+              onClick={() => setDeleteTarget(null)}
+              disabled={isDeleting}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              className={styles.dangerButton}
+              onClick={onConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? "삭제 중…" : "삭제"}
+            </button>
+          </div>
+        }
+      >
+        {deleteTarget ? (
+          <div>
+            <div className={styles.confirmText}>
+              {deleteTarget.kind === "class" ? (
+                <>
+                  학급 <b>{deleteTarget.name}</b>을(를) 삭제하시겠어요?
+                  <br />
+                  학생 {deleteTarget.studentCount}명의 코드와 관련 제출 {deleteTarget.submissionCount}건이 함께 삭제됩니다.
+                </>
+              ) : (
+                <>
+                  과제 <b>{deleteTarget.title}</b>을(를) 삭제하시겠어요?
+                  <br />
+                  공유 링크와 관련 제출 {deleteTarget.submissionCount}건이 함께 삭제됩니다.
+                </>
+              )}
+            </div>
+            <div className={styles.confirmHint}>
+              로컬 DB에서 즉시 삭제되며, DB 연결이 활성화된 경우 연결된 스프레드시트에도 동기화됩니다.
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

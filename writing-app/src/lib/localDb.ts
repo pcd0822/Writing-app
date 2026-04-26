@@ -209,12 +209,53 @@ export function addClass(db: TeacherDb, cls: ClassRoom): TeacherDb {
   };
 }
 
+export function deleteClass(db: TeacherDb, classId: string): TeacherDb {
+  const removedSubmissionIds = new Set(
+    db.submissions.filter((s) => s.classId === classId).map((s) => s.id),
+  );
+  const allocations = db.allocations.map((a) => ({
+    ...a,
+    targets: a.targets.filter((t) => t.classId !== classId),
+  }));
+  return {
+    ...db,
+    classes: db.classes.filter((c) => c.id !== classId),
+    allocations,
+    submissions: db.submissions.filter((s) => s.classId !== classId),
+    feedbackNotes: db.feedbackNotes.filter((n) => !removedSubmissionIds.has(n.submissionId)),
+    aiLogs: db.aiLogs.filter((l) => !removedSubmissionIds.has(l.submissionId)),
+    scores: db.scores.filter((s) => !removedSubmissionIds.has(s.submissionId)),
+    stepTransitions: db.stepTransitions.filter((t) => !removedSubmissionIds.has(t.submissionId)),
+    aiInteractions: db.aiInteractions.filter((i) => !removedSubmissionIds.has(i.submissionId)),
+    teacherComments: db.teacherComments.filter((c) => !removedSubmissionIds.has(c.submissionId)),
+  };
+}
+
 export function createAssignmentId() {
   return nanoid(12);
 }
 
 export function addAssignment(db: TeacherDb, a: Assignment): TeacherDb {
   return { ...db, assignments: [a, ...db.assignments] };
+}
+
+export function deleteAssignment(db: TeacherDb, assignmentId: string): TeacherDb {
+  const removedSubmissionIds = new Set(
+    db.submissions.filter((s) => s.assignmentId === assignmentId).map((s) => s.id),
+  );
+  return {
+    ...db,
+    assignments: db.assignments.filter((a) => a.id !== assignmentId),
+    allocations: db.allocations.filter((a) => a.assignmentId !== assignmentId),
+    shares: db.shares.filter((s) => s.assignmentId !== assignmentId),
+    submissions: db.submissions.filter((s) => s.assignmentId !== assignmentId),
+    feedbackNotes: db.feedbackNotes.filter((n) => !removedSubmissionIds.has(n.submissionId)),
+    aiLogs: db.aiLogs.filter((l) => !removedSubmissionIds.has(l.submissionId)),
+    scores: db.scores.filter((s) => !removedSubmissionIds.has(s.submissionId)),
+    stepTransitions: db.stepTransitions.filter((t) => !removedSubmissionIds.has(t.submissionId)),
+    aiInteractions: db.aiInteractions.filter((i) => !removedSubmissionIds.has(i.submissionId)),
+    teacherComments: db.teacherComments.filter((c) => !removedSubmissionIds.has(c.submissionId)),
+  };
 }
 
 export function setAllocation(

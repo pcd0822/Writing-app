@@ -1,9 +1,58 @@
 :root {
-  --background: #f5faff;
-  --foreground: #1a365d;
-  --accent-blue: #63b3ed;
-  --accent-blue-deep: #3182ce;
-  --pastel-border: rgba(49, 130, 206, 0.22);
+  /* Surfaces — Paper Stack */
+  --paper: #faf8f4;
+  --paper-elevated: #ffffff;
+  --paper-inset: #f5f2ec;
+  --paper-highlight: #eef2ff;
+
+  /* Ink (text) */
+  --ink: #1e293b;
+  --ink-muted: #64748b;
+  --ink-faint: #94a3b8;
+
+  /* Brand */
+  --primary: #4338ca;
+  --primary-strong: #3730a3;
+  --primary-soft: #eef2ff;
+  --primary-light: #c7d2fe;
+  --primary-gradient: linear-gradient(135deg, #4338ca 0%, #6366f1 100%);
+
+  --secondary: #7c3aed;
+  --secondary-soft: #f5f3ff;
+  --secondary-light: #ddd6fe;
+
+  --tertiary: #0d9488;
+  --tertiary-soft: #f0fdfa;
+  --tertiary-light: #99f6e4;
+
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --warning-light: #fde68a;
+
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --danger-light: #fecaca;
+
+  /* Borders & shadows */
+  --hairline: rgba(67, 56, 202, 0.08);
+  --hairline-strong: rgba(67, 56, 202, 0.16);
+  --shadow-sm: 0 1px 3px rgba(67, 56, 202, 0.05);
+  --shadow-md: 0 4px 16px rgba(67, 56, 202, 0.06);
+  --shadow-lg: 0 12px 32px rgba(67, 56, 202, 0.1);
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Backwards-compat */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --accent-blue: var(--primary);
+  --accent-blue-deep: var(--primary-strong);
+  --pastel-border: var(--hairline-strong);
 }
 
 html {
@@ -21,11 +70,12 @@ body {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--font-noto-sans), var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
 }
 
 * {
@@ -37,4 +87,9 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+::selection {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
 }

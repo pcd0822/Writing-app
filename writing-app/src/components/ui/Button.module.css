@@ -1,10 +1,14 @@
 .button {
   width: 100%;
-  height: 44px;
-  border-radius: 12px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
   cursor: pointer;
-  font-weight: 650;
+  font-family: var(--font-inter), var(--font-noto-sans), sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.01em;
   transition:
     transform 0.08s ease,
     background-color 0.15s ease,
@@ -15,47 +19,43 @@
 }
 
 .button:active:not(:disabled) {
-  transform: translateY(2px) scale(0.98);
+  transform: translateY(1px) scale(0.99);
 }
 
 .button:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .primary {
-  background: #7dd3fc;
-  color: #0c4a6e;
-  border-color: #38bdf8;
-  box-shadow: 0 1px 0 rgba(14, 116, 144, 0.25);
+  background: var(--primary-gradient);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(67, 56, 202, 0.2);
 }
 
 .primary:hover:not(:disabled):not([data-loading="true"]) {
-  background: #38bdf8;
-  color: #0c2d48;
+  box-shadow: 0 4px 14px rgba(67, 56, 202, 0.32);
 }
 
 .primary:active:not(:disabled) {
-  background: #0ea5e9;
-  border-color: #0284c7;
-  box-shadow: inset 0 2px 4px rgba(12, 74, 110, 0.2);
+  box-shadow: 0 1px 4px rgba(67, 56, 202, 0.18);
 }
 
 .secondary {
-  background: #ffffff;
-  color: #0c4a6e;
-  border-color: #93c5fd;
-  box-shadow: 0 1px 0 rgba(148, 163, 184, 0.25);
+  background: var(--paper-elevated);
+  color: var(--ink);
+  border-color: var(--hairline-strong);
 }
 
 .secondary:hover:not(:disabled):not([data-loading="true"]) {
-  background: #f0f9ff;
-  border-color: #60a5fa;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary-light);
 }
 
 .secondary:active:not(:disabled) {
-  background: #e0f2fe;
-  border-color: #3b82f6;
+  background: var(--primary-soft);
 }
 
 .inline {
@@ -66,11 +66,13 @@
 }
 
 .spinner {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
-  border: 2px solid rgba(12, 74, 110, 0.25);
-  border-top-color: #0c4a6e;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  opacity: 0.65;
   animation: spin 700ms linear infinite;
   flex-shrink: 0;
 }

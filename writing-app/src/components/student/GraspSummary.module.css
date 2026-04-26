@@ -1,16 +1,21 @@
 .wrap {
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--paper-elevated);
+  border: 1px solid var(--hairline);
+  padding: 14px;
 }
 
 .title {
-  font-weight: 850;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  color: #0c4a6e;
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 10px;
 }
 
 .grid {
@@ -22,7 +27,10 @@
 .item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
 }
 
 .itemFull {
@@ -31,17 +39,18 @@
 }
 
 .key {
-  font-size: 10px;
-  font-weight: 800;
-  color: #64748b;
-  letter-spacing: 0.04em;
+  font-family: var(--font-inter), sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .val {
   font-size: 12px;
-  color: #0f172a;
-  line-height: 1.45;
+  color: var(--ink);
+  line-height: 1.5;
   white-space: pre-wrap;
 }
 
@@ -52,30 +61,33 @@
 }
 
 .tag {
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: #e0f2fe;
-  color: #0c4a6e;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: var(--paper-elevated);
+  color: var(--primary);
+  font-family: var(--font-inter), sans-serif;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .editBtn {
-  margin-top: 8px;
+  margin-top: 10px;
   height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #334155;
+  padding: 0 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--hairline-strong);
+  background: var(--paper-elevated);
+  color: var(--ink-muted);
+  font-family: var(--font-inter), sans-serif;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  transition: transform 0.08s ease;
+  transition: transform 0.08s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
 .editBtn:hover {
-  background: #f8fafc;
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 .editBtn:active {
