@@ -121,8 +121,8 @@ export default function WritePage() {
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [feedbackPanelTab, setFeedbackPanelTab] = useState<FeedbackPanelTab>("outline");
   const [feedbackNoteModalId, setFeedbackNoteModalId] = useState<string | null>(null);
-  const [tutorWidth, setTutorWidth] = useState(400);
-  const [tutorHeight, setTutorHeight] = useState(680);
+  const [tutorWidth, setTutorWidth] = useState(420);
+  const [tutorHeight, setTutorHeight] = useState(900);
 
   // 새 상태들
   const [viewMode, setViewMode] = useState<ViewMode>("write");
@@ -228,7 +228,7 @@ export default function WritePage() {
         const n = parseInt(h, 10);
         if (Number.isFinite(n)) setTutorHeight(Math.min(window.innerHeight - 32, Math.max(280, n)));
       } else {
-        setTutorHeight(Math.min(780, window.innerHeight - 32));
+        setTutorHeight(Math.max(720, window.innerHeight - 32));
       }
     } catch { /* ignore */ }
   }, []);

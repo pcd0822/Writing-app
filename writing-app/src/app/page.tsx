@@ -30,8 +30,8 @@ export default function Home() {
             <div className={styles.titleBlock}>
               <h1 className={styles.title}>실시간 작문</h1>
               <p className={styles.subtitle}>
-                교사/학생이 같은 과제를 단계별로 수행하고, 승인·피드백·AI 튜터 기록까지
-                남기는 작문 수행평가 앱
+                개요부터 고쳐쓰기까지 단계별로 수행하고, 교사 승인·피드백·AI 튜터 기록을
+                한곳에 남기는 작문 학습 플랫폼.
               </p>
             </div>
           </div>
@@ -39,8 +39,8 @@ export default function Home() {
 
         <div className={styles.grid}>
           <section className={styles.card}>
-            <h2>교사</h2>
-            <p>Google 로그인으로 교사 대시보드에 로그인합니다.</p>
+            <h2>교사 로그인</h2>
+            <p>Google 계정으로 로그인하여 학급·과제를 만들고 학생의 작문 진행을 실시간으로 확인하세요.</p>
             <button
               className={styles.primaryButton}
               onClick={onTeacherLogin}
@@ -61,20 +61,24 @@ export default function Home() {
                 onClick={() => router.push("/teacher")}
                 disabled={isLoading}
               >
-                교사 화면으로 이동
+                교사 대시보드로 이동
               </button>
             ) : null}
           </section>
 
           <section className={styles.card}>
-            <h2>학생</h2>
-            <p>
-              교사가 공유한 링크로 접속 후, 학번과 학생 코드를 입력해 작문을 시작합니다.
-            </p>
+            <h2>학생 시작하기</h2>
+            <p>교사가 공유한 링크로 접속한 뒤, 학번과 8자리 코드를 입력하면 작문을 시작할 수 있어요.</p>
             <div className={styles.placeholder}>
-              학생 화면은 다음 단계에서 “공유 링크(유효시간)” 기능과 함께 연결됩니다.
+              <b>로그인 불필요.</b> 별도 가입 없이 공유 링크 + 학번 + 코드만으로 어느 기기에서든 작업을 이어갈 수 있습니다.
             </div>
           </section>
+        </div>
+
+        <div className={styles.footer}>
+          <span aria-hidden="true" />
+          단계별 작문 · GRASP 맥락 설계 · AI 협력 · 사고 성장 대시보드
+          <span aria-hidden="true" />
         </div>
       </main>
     </div>
