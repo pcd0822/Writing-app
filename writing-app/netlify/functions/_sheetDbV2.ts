@@ -264,12 +264,29 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+const HEADER_FIRST_CELLS = new Set([
+  "id",
+  "classid",
+  "token",
+  "submissionid",
+  "assignmentid",
+  "noteid",
+  "logid",
+  // 사용자가 한글로 바꾸었을 가능성 대비
+  "학급id",
+  "학번",
+  "과제id",
+  "토큰",
+  "제출id",
+]);
+
 function rowsAfterHeader(rows: string[][]): string[][] {
-  if (rows.length === 0) return [];
-  // 첫 행이 헤더(첫 칸이 'id'/'classId'/'token'/'submissionId'/'assignmentId' 등)면 스킵
-  const first = String(rows[0]?.[0] ?? "").toLowerCase();
-  const looksLikeHeader = ["id", "classid", "token", "submissionid", "assignmentid", "noteid", "logid"].includes(first);
-  return looksLikeHeader ? rows.slice(1) : rows;
+  return rows.filter((row) => {
+    const first = String(row[0] ?? "").trim().toLowerCase();
+    if (!first) return false; // 빈 행 스킵
+    if (HEADER_FIRST_CELLS.has(first)) return false; // 헤더 스킵
+    return true;
+  });
 }
 
 /**

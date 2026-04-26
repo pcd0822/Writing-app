@@ -14,9 +14,29 @@ export function getActiveSpreadsheetId() {
   return window.localStorage.getItem(ACTIVE_SID_KEY);
 }
 
-export async function pullDbFromSheet(spreadsheetId: string) {
-  const res = await callFunction<{ db: unknown | null }>("db-get", { spreadsheetId });
+export type PullDiag = {
+  metaCellLen: number;
+  metaParsed: boolean;
+  tabularRowCounts: {
+    classes: number;
+    students: number;
+    assignments: number;
+    submissions: number;
+  };
+};
+
+export type PullResult = {
+  db: unknown | null;
+  diag?: PullDiag | null;
+};
+
+export async function pullDbFromSheet(spreadsheetId: string): Promise<unknown | null> {
+  const res = await callFunction<PullResult>("db-get", { spreadsheetId });
   return res.db;
+}
+
+export async function pullDbFromSheetWithDiag(spreadsheetId: string): Promise<PullResult> {
+  return await callFunction<PullResult>("db-get", { spreadsheetId });
 }
 
 export async function pushDbToSheet(spreadsheetId: string, db: unknown) {

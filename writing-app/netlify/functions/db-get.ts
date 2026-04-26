@@ -21,6 +21,11 @@ export const handler: Handler = async (event) => {
     const db = await readTeacherDbFromSpreadsheet(spreadsheetId);
     return json(200, { db });
   } catch (e) {
-    return json(500, { error: (e as Error).message || "db-get failed" });
+    const err = e as Error & { diag?: unknown };
+    if (err.message === "EMPTY_DB") {
+      // 시트는 읽었으나 복원할 데이터가 없음 — 진단 정보를 포함해 200으로 돌려줌
+      return json(200, { db: null, diag: err.diag ?? null });
+    }
+    return json(500, { error: err.message || "db-get failed" });
   }
 };
