@@ -11,6 +11,8 @@ import {
   loadTeacherDb,
   saveTeacherDb,
 } from "@/lib/localDb";
+import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+import type { TeacherDb } from "@/lib/types";
 import styles from "./teacher.module.css";
 import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModal";
 import { DriveSetupModal } from "@/components/teacher/DriveSetupModal";
@@ -39,6 +41,8 @@ export default function TeacherPage() {
   const [dbVersion, setDbVersion] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ kind: "ok" | "empty" | "err"; msg: string } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) router.replace("/");
@@ -119,6 +123,61 @@ export default function TeacherPage() {
     setDbVersion((v) => v + 1);
   }
 
+  /** 시트에서 원격 DB를 가져와 로컬에 저장 (push는 생략하여 race 방지) */
+  async function syncFromSheet(silent = false) {
+    if (typeof window === "undefined") return;
+    const sid = loadTeacherSettings()?.spreadsheetId;
+    if (!sid) {
+      if (!silent) setSyncStatus({ kind: "err", msg: "먼저 'DB 연결'에서 스프레드시트 ID를 등록해주세요." });
+      return;
+    }
+    if (!silent) setIsSyncing(true);
+    setSyncStatus(null);
+    try {
+      setActiveSpreadsheetId(sid);
+      const remote = await pullDbFromSheet(sid);
+      if (remote) {
+        const remoteDb = remote as TeacherDb;
+        saveTeacherDb(remoteDb, { skipRemotePush: true });
+        const totalStudents = (remoteDb.classes || []).reduce(
+          (sum, c) => sum + (c.students?.length || 0),
+          0,
+        );
+        setSyncStatus({
+          kind: "ok",
+          msg: `시트에서 가져옴 — 학급 ${remoteDb.classes?.length || 0}개 · 학생 ${totalStudents}명 · 과제 ${remoteDb.assignments?.length || 0}개`,
+        });
+        refreshDb();
+      } else {
+        setSyncStatus({
+          kind: "empty",
+          msg: "시트에 저장된 데이터가 없습니다. (다른 디바이스에서 한 번도 저장되지 않았거나 시트 ID가 다를 수 있습니다)",
+        });
+      }
+    } catch (e) {
+      setSyncStatus({ kind: "err", msg: (e as Error).message || "동기화 실패" });
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  /** 시트 연결됐는데 로컬이 비어 있으면 자동 pull (디바이스 전환 시) */
+  useEffect(() => {
+    if (typeof window === "undefined" || !user) return;
+    const sid = loadTeacherSettings()?.spreadsheetId;
+    if (!sid) return;
+    try {
+      const localDb = loadTeacherDb();
+      const isEmpty =
+        (localDb.classes?.length || 0) === 0 &&
+        (localDb.assignments?.length || 0) === 0;
+      if (isEmpty) {
+        void syncFromSheet(true);
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   function openDeleteClassConfirm(classId: string) {
     const fresh = loadTeacherDb();
     const cls = fresh.classes.find((c) => c.id === classId);
@@ -190,6 +249,16 @@ export default function TeacherPage() {
             >
               {sheetId ? "📗 DB 연결됨" : "📎 DB 연결"}
             </button>
+            {sheetId ? (
+              <button
+                className={styles.tinyButton}
+                onClick={() => void syncFromSheet(false)}
+                disabled={isSyncing}
+                title="시트에서 최신 데이터를 다시 가져옵니다 (다른 디바이스에서 변경된 내용을 반영)"
+              >
+                {isSyncing ? "동기화 중…" : "🔄 시트에서 동기화"}
+              </button>
+            ) : null}
             <button
               className={styles.tinyButton}
               onClick={() => setIsDriveSetupOpen(true)}
@@ -202,6 +271,28 @@ export default function TeacherPage() {
             </button>
           </div>
         </div>
+
+        {syncStatus ? (
+          <div
+            className={
+              syncStatus.kind === "ok"
+                ? styles.syncToastOk
+                : syncStatus.kind === "empty"
+                  ? styles.syncToastWarn
+                  : styles.syncToastErr
+            }
+          >
+            <span>{syncStatus.msg}</span>
+            <button
+              type="button"
+              className={styles.syncToastClose}
+              onClick={() => setSyncStatus(null)}
+              aria-label="닫기"
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
 
         <div className={styles.grid}>
           <div className={styles.row2}>

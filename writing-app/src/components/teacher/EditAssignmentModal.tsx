@@ -21,6 +21,7 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
   const [prompt, setPrompt] = useState("");
   const [task, setTask] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<Attachment[]>([]);
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +43,7 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
     setPrompt(a.prompt);
     setTask(a.task);
     setFiles([]);
+    setExistingAttachments(a.attachments ?? []);
     const alloc = db.allocations.find((x) => x.assignmentId === assignmentId);
     const keys = new Set<string>();
     if (alloc) {
@@ -52,6 +54,21 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
     }
     setSelectedTargets(keys);
   }, [isOpen, assignmentId, db]);
+
+  function removeExistingAttachment(idx: number) {
+    setExistingAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function removePendingFile(idx: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function formatSize(bytes?: number) {
+    if (!bytes && bytes !== 0) return "-";
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  }
 
   function keyForClass(classId: string) {
     return `class:${classId}`;
@@ -114,7 +131,7 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
       if (idx < 0) return setError("과제를 찾을 수 없습니다.");
       const prev = fresh.assignments[idx]!;
 
-      let attachments: Attachment[] = [...(prev.attachments ?? [])];
+      let attachments: Attachment[] = [...existingAttachments];
       if (files.length) {
         const settings = loadTeacherSettings();
         if (settings?.driveFolderId && settings?.driveOAuthRefreshToken) {
@@ -184,7 +201,7 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
       isOpen={isOpen}
       onClose={onClose}
       title="과제 수정하기"
-      description="제시문·과제·첨부를 수정하고 배당을 다시 지정할 수 있습니다. 새 파일을 추가하면 기존 첨부 뒤에 이어 붙습니다."
+      description="제시문·과제·첨부를 수정하고 배당을 다시 지정할 수 있습니다. 기존 첨부 목록은 ×로 개별 제거할 수 있고, 새 파일은 목록 뒤에 이어 붙습니다."
       size="xl"
       footer={
         <div className={styles.footerRow}>
@@ -234,8 +251,38 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
             />
           </label>
 
+          <div className={styles.label}>
+            <span>기존 첨부파일 ({existingAttachments.length}개)</span>
+            {existingAttachments.length === 0 ? (
+              <div className={styles.hint}>아직 첨부된 파일이 없습니다.</div>
+            ) : (
+              <div className={styles.fileList}>
+                {existingAttachments.map((att, i) => (
+                  <div key={`${att.name}-${i}`} className={styles.fileItem}>
+                    <span className={styles.mono} title={att.name}>{att.name}</span>
+                    <span className={styles.fileItemRight}>
+                      {att.driveFileId ? (
+                        <span className={styles.driveBadge} title="Google 드라이브에 저장됨">DRIVE</span>
+                      ) : null}
+                      <span className={styles.dim}>{formatSize(att.size)}</span>
+                      <button
+                        type="button"
+                        className={styles.removeBtn}
+                        onClick={() => removeExistingAttachment(i)}
+                        title="이 첨부 제거"
+                        aria-label={`${att.name} 제거`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <label className={styles.label}>
-            <span>첨부파일 추가</span>
+            <span>새 첨부파일 추가</span>
             <input
               className={styles.file}
               type="file"
@@ -244,15 +291,26 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
             />
             {files.length ? (
               <div className={styles.fileList}>
-                {files.map((f) => (
-                  <div key={f.name} className={styles.fileItem}>
-                    <span className={styles.mono}>{f.name}</span>
-                    <span className={styles.dim}>{Math.round(f.size / 1024)}KB</span>
+                {files.map((f, i) => (
+                  <div key={`${f.name}-${i}`} className={styles.fileItem}>
+                    <span className={styles.mono} title={f.name}>{f.name}</span>
+                    <span className={styles.fileItemRight}>
+                      <span className={styles.dim}>{formatSize(f.size)}</span>
+                      <button
+                        type="button"
+                        className={styles.removeBtn}
+                        onClick={() => removePendingFile(i)}
+                        title="추가 취소"
+                        aria-label={`${f.name} 추가 취소`}
+                      >
+                        ×
+                      </button>
+                    </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className={styles.hint}>추가할 파일만 선택하세요. 저장 시 기존 첨부에 합쳐집니다.</div>
+              <div className={styles.hint}>추가할 파일만 선택하세요. 저장 시 위 기존 목록 뒤에 이어 붙습니다.</div>
             )}
           </label>
         </div>

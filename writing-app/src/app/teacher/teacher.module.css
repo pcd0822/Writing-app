@@ -400,6 +400,63 @@
   cursor: not-allowed;
 }
 
+.syncToastOk,
+.syncToastWarn,
+.syncToastErr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.syncToastOk {
+  background: var(--tertiary-soft);
+  border-left: 3px solid var(--tertiary);
+  color: var(--tertiary);
+}
+
+.syncToastWarn {
+  background: var(--warning-soft);
+  border-left: 3px solid var(--warning);
+  color: var(--warning);
+}
+
+.syncToastErr {
+  background: var(--danger-soft);
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+}
+
+.syncToastClose {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.65;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease, transform 0.08s ease;
+}
+
+.syncToastClose:hover {
+  opacity: 1;
+}
+
+.syncToastClose:active {
+  transform: scale(0.9);
+}
+
 @media (max-width: 900px) {
   .classes {
     grid-template-columns: 1fr;

@@ -169,11 +169,12 @@ export function loadTeacherDb(): TeacherDb {
 
 export function saveTeacherDb(
   db: TeacherDb,
-  options?: { spreadsheetId?: string | null },
+  options?: { spreadsheetId?: string | null; skipRemotePush?: boolean },
 ) {
   assertBrowser();
   const normalized = normalizeDriveAttachmentsInDb(db);
   window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  if (options?.skipRemotePush) return;
   const pushId =
     (options?.spreadsheetId && String(options.spreadsheetId).trim()) ||
     getActiveSpreadsheetId();
