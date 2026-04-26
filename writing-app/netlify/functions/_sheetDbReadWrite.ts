@@ -1,8 +1,10 @@
 import { getSheetsClient } from "./_sheets";
 import {
   buildChunkSheetValues,
+  buildSlimDbFromTabular,
   buildTabularSheetValues,
   isSheetDbV2Meta,
+  isTabularSlimEmpty,
   MAX_CELL_CHARS,
   mergeChunksIntoDb,
   toSlimDbForMeta,
@@ -47,6 +49,16 @@ export async function readTeacherDbFromSpreadsheet(
     "ai_log_text!A:C",
     "score_text!A:C",
     "extra_text!A:D",
+    // tabular fallback용 시트들
+    "classes!A:C",
+    "students!A:C",
+    "assignments!A:C",
+    "assignment_targets!A:D",
+    "shares!A:F",
+    "submissions!A:N",
+    "feedback_notes!A:G",
+    "ai_logs!A:E",
+    "scores!A:F",
   ];
 
   const res = await sheets.spreadsheets.values.batchGet({
@@ -56,8 +68,47 @@ export async function readTeacherDbFromSpreadsheet(
 
   const valueRanges = res.data.valueRanges || [];
   const metaCell = valueRanges[0]?.values?.[0]?.[0] as string | undefined;
-  if (!metaCell?.trim()) return null;
 
+  const assignmentText = (valueRanges[1]?.values || []) as string[][];
+  const submissionText = (valueRanges[2]?.values || []) as string[][];
+  const feedbackText = (valueRanges[3]?.values || []) as string[][];
+  const aiLogText = (valueRanges[4]?.values || []) as string[][];
+  const scoreText = (valueRanges[5]?.values || []) as string[][];
+  const extraText = (valueRanges[6]?.values || []) as string[][];
+
+  // 1) meta!A1이 비어 있으면 tabular 시트에서 fallback 복원 시도
+  if (!metaCell?.trim()) {
+    const tabularSlim = buildSlimDbFromTabular({
+      classes: (valueRanges[7]?.values || []) as string[][],
+      students: (valueRanges[8]?.values || []) as string[][],
+      assignments: (valueRanges[9]?.values || []) as string[][],
+      assignment_targets: (valueRanges[10]?.values || []) as string[][],
+      shares: (valueRanges[11]?.values || []) as string[][],
+      submissions: (valueRanges[12]?.values || []) as string[][],
+      feedback_notes: (valueRanges[13]?.values || []) as string[][],
+      ai_logs: (valueRanges[14]?.values || []) as string[][],
+      scores: (valueRanges[15]?.values || []) as string[][],
+    });
+    if (isTabularSlimEmpty(tabularSlim)) return null;
+
+    const recovered = mergeChunksIntoDb(tabularSlim, {
+      assignmentText,
+      submissionText,
+      feedbackText,
+      aiLogText,
+      scoreText,
+      extraText,
+    });
+
+    // 복원 성공 — 다음 읽기는 빠르게 하기 위해 meta에 다시 씀 (best-effort)
+    void writeTeacherDbToSpreadsheet(spreadsheetId, recovered).catch(() => {
+      /* meta write-back 실패는 무시 */
+    });
+
+    return recovered;
+  }
+
+  // 2) meta!A1에 데이터가 있는 정상 경로
   let parsed: unknown;
   try {
     parsed = JSON.parse(metaCell);
@@ -72,13 +123,6 @@ export async function readTeacherDbFromSpreadsheet(
 
   const slim = TeacherDbSchema.safeParse(parsed);
   if (!slim.success) return null;
-
-  const assignmentText = (valueRanges[1]?.values || []) as string[][];
-  const submissionText = (valueRanges[2]?.values || []) as string[][];
-  const feedbackText = (valueRanges[3]?.values || []) as string[][];
-  const aiLogText = (valueRanges[4]?.values || []) as string[][];
-  const scoreText = (valueRanges[5]?.values || []) as string[][];
-  const extraText = (valueRanges[6]?.values || []) as string[][];
 
   return mergeChunksIntoDb(slim.data, {
     assignmentText,

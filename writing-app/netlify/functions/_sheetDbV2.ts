@@ -258,6 +258,248 @@ export function isSheetDbV2Meta(parsed: unknown): parsed is { sheetDbVersion: nu
   );
 }
 
+function num(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function rowsAfterHeader(rows: string[][]): string[][] {
+  if (rows.length === 0) return [];
+  // 첫 행이 헤더(첫 칸이 'id'/'classId'/'token'/'submissionId'/'assignmentId' 등)면 스킵
+  const first = String(rows[0]?.[0] ?? "").toLowerCase();
+  const looksLikeHeader = ["id", "classid", "token", "submissionid", "assignmentid", "noteid", "logid"].includes(first);
+  return looksLikeHeader ? rows.slice(1) : rows;
+}
+
+/**
+ * meta!A1이 비어 있을 때, 표 시트(classes/students/assignments/...)에서 slim DB를 재구성합니다.
+ * 청크 시트 결합은 이후 mergeChunksIntoDb가 처리합니다.
+ */
+export function buildSlimDbFromTabular(tab: {
+  classes: string[][];
+  students: string[][];
+  assignments: string[][];
+  assignment_targets: string[][];
+  shares: string[][];
+  submissions: string[][];
+  feedback_notes: string[][];
+  ai_logs: string[][];
+  scores: string[][];
+}): TeacherDb {
+  // classes (id, name, createdAt) + students (classId, studentNo, studentCode)
+  const studentsByClass = new Map<string, { studentNo: string; studentCode: string }[]>();
+  for (const row of rowsAfterHeader(tab.students)) {
+    const classId = String(row[0] ?? "");
+    const studentNo = String(row[1] ?? "");
+    const studentCode = String(row[2] ?? "");
+    if (!classId || !studentNo) continue;
+    let list = studentsByClass.get(classId);
+    if (!list) {
+      list = [];
+      studentsByClass.set(classId, list);
+    }
+    list.push({ studentNo, studentCode });
+  }
+  const classes = rowsAfterHeader(tab.classes)
+    .map((row) => {
+      const id = String(row[0] ?? "");
+      const name = String(row[1] ?? "");
+      const createdAt = num(row[2]) ?? Date.now();
+      if (!id || !name) return null;
+      return {
+        id,
+        name,
+        createdAt,
+        students: studentsByClass.get(id) || [],
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  // assignments (id, title, createdAt) — prompt/task는 비워두고 청크에서 채움
+  const assignments = rowsAfterHeader(tab.assignments)
+    .map((row) => {
+      const id = String(row[0] ?? "");
+      const title = String(row[1] ?? "");
+      const createdAt = num(row[2]) ?? Date.now();
+      if (!id || !title) return null;
+      return {
+        id,
+        title,
+        prompt: "",
+        task: "",
+        attachments: [],
+        createdAt,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  // assignment_targets (assignmentId, targetType, classId, studentNo)
+  const targetsByAssignment = new Map<string, ({ type: "class"; classId: string } | { type: "student"; classId: string; studentNo: string })[]>();
+  for (const row of rowsAfterHeader(tab.assignment_targets)) {
+    const assignmentId = String(row[0] ?? "");
+    const targetType = String(row[1] ?? "");
+    const classId = String(row[2] ?? "");
+    const studentNo = String(row[3] ?? "");
+    if (!assignmentId || !classId) continue;
+    let list = targetsByAssignment.get(assignmentId);
+    if (!list) {
+      list = [];
+      targetsByAssignment.set(assignmentId, list);
+    }
+    if (targetType === "class") {
+      list.push({ type: "class", classId });
+    } else if (targetType === "student" && studentNo) {
+      list.push({ type: "student", classId, studentNo });
+    }
+  }
+  const allocations = Array.from(targetsByAssignment.entries()).map(([assignmentId, targets]) => ({
+    assignmentId,
+    targets,
+  }));
+
+  // shares (token, assignmentId, createdAt, expiresAt, revokedAt, spreadsheetId)
+  const shares = rowsAfterHeader(tab.shares)
+    .map((row) => {
+      const token = String(row[0] ?? "");
+      const assignmentId = String(row[1] ?? "");
+      const createdAt = num(row[2]) ?? Date.now();
+      const expiresAt = num(row[3]) ?? Date.now() + 7 * 24 * 60 * 60 * 1000;
+      const revokedAt = num(row[4]);
+      const spreadsheetId = String(row[5] ?? "");
+      if (!token || !assignmentId) return null;
+      return {
+        token,
+        assignmentId,
+        createdAt,
+        expiresAt,
+        revokedAt,
+        ...(spreadsheetId ? { spreadsheetId } : {}),
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  // submissions (id, assignmentId, classId, studentNo, createdAt, updatedAt, ...timestamps)
+  const submissions = rowsAfterHeader(tab.submissions)
+    .map((row) => {
+      const id = String(row[0] ?? "");
+      const assignmentId = String(row[1] ?? "");
+      const classId = String(row[2] ?? "");
+      const studentNo = String(row[3] ?? "");
+      if (!id || !assignmentId || !classId || !studentNo) return null;
+      return {
+        id,
+        assignmentId,
+        classId,
+        studentNo,
+        createdAt: num(row[4]) ?? Date.now(),
+        updatedAt: num(row[5]) ?? Date.now(),
+        outlineText: "",
+        draftText: "",
+        reviseText: "",
+        outlineSubmittedAt: num(row[6]),
+        draftSubmittedAt: num(row[7]),
+        reviseSubmittedAt: num(row[8]),
+        outlineApprovedAt: num(row[9]),
+        draftApprovedAt: num(row[10]),
+        reviseApprovedAt: num(row[11]),
+        finalApprovedAt: num(row[12]),
+        finalReportPublishedAt: num(row[13]),
+        finalReportSnapshot: "",
+        graspData: "",
+        outlineRejectReason: "",
+        draftRejectReason: "",
+        reviseRejectReason: "",
+        currentStep: 1,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  // feedback_notes (id, submissionId, stage, createdAt, start, end, resolvedAt)
+  const feedbackNotes = rowsAfterHeader(tab.feedback_notes)
+    .map((row) => {
+      const id = String(row[0] ?? "");
+      const submissionId = String(row[1] ?? "");
+      const stage = String(row[2] ?? "");
+      if (!id || !submissionId) return null;
+      if (stage !== "outline" && stage !== "draft" && stage !== "revise") return null;
+      return {
+        id,
+        submissionId,
+        stage: stage as "outline" | "draft" | "revise",
+        createdAt: num(row[3]) ?? Date.now(),
+        start: num(row[4]) ?? 0,
+        end: num(row[5]) ?? 0,
+        resolvedAt: num(row[6]),
+        teacherText: "",
+        anchorText: "",
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  // ai_logs (id, submissionId, stage, createdAt, role)
+  const aiLogs = rowsAfterHeader(tab.ai_logs)
+    .map((row) => {
+      const id = String(row[0] ?? "");
+      const submissionId = String(row[1] ?? "");
+      const stage = String(row[2] ?? "");
+      const role = String(row[4] ?? "");
+      if (!id || !submissionId) return null;
+      if (stage !== "outline" && stage !== "draft" && stage !== "revise") return null;
+      if (role !== "student" && role !== "assistant") return null;
+      return {
+        id,
+        submissionId,
+        stage: stage as "outline" | "draft" | "revise",
+        createdAt: num(row[3]) ?? Date.now(),
+        role: role as "student" | "assistant",
+        text: "",
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  // scores (submissionId, createdAt, score, outlineScore, draftScore, reviseScore)
+  const scores = rowsAfterHeader(tab.scores)
+    .map((row) => {
+      const submissionId = String(row[0] ?? "");
+      if (!submissionId) return null;
+      return {
+        submissionId,
+        createdAt: num(row[1]) ?? Date.now(),
+        score: num(row[2]),
+        outlineScore: num(row[3]),
+        draftScore: num(row[4]),
+        reviseScore: num(row[5]),
+        teacherSummary: "",
+        isFinalized: false,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+
+  return {
+    version: 5,
+    classes,
+    assignments,
+    allocations,
+    shares,
+    submissions,
+    feedbackNotes,
+    aiLogs,
+    scores,
+    stepTransitions: [],
+    aiInteractions: [],
+    teacherComments: [],
+  };
+}
+
+export function isTabularSlimEmpty(slim: TeacherDb): boolean {
+  return (
+    (slim.classes?.length || 0) === 0 &&
+    (slim.assignments?.length || 0) === 0 &&
+    (slim.submissions?.length || 0) === 0
+  );
+}
+
 function pushChunks4(id: string, field: string, text: string, out: string[][]) {
   const parts = chunkText(text);
   parts.forEach((content, partIndex) => {
