@@ -414,6 +414,9 @@ export function mergeTeacherDbForStudentView(local: TeacherDb, remote: TeacherDb
       outlineSubmittedAt: ls.outlineSubmittedAt ?? rs.outlineSubmittedAt,
       draftSubmittedAt: ls.draftSubmittedAt ?? rs.draftSubmittedAt,
       reviseSubmittedAt: ls.reviseSubmittedAt ?? rs.reviseSubmittedAt,
+      // 학생이 작성한 GRASPS·진행 단계는 local에 값이 있으면 보존 (remote 푸시 지연 시 사라지지 않도록)
+      graspData: ls.graspData || rs.graspData,
+      currentStep: ls.currentStep ?? rs.currentStep,
       updatedAt: Math.max(ls.updatedAt, rs.updatedAt),
     };
   });

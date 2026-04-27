@@ -112,6 +112,7 @@ export default function WritePage() {
   } | null>(null);
   const [aiSelectedText, setAiSelectedText] = useState("");
   const [dbBump, setDbBump] = useState(0);
+  const initialLoadDone = useRef(false);
   const [stageEditUnlocked, setStageEditUnlocked] = useState<EditUnlock>({
     outline: false,
     draft: false,
@@ -183,9 +184,15 @@ export default function WritePage() {
         .sort((a, b) => a.timestamp - b.timestamp);
 
       // GRASP 데이터 로드
+      // - DB에 값이 있으면 React 상태에도 반영
+      // - DB에 값이 없을 때 React 상태(graspData)를 null로 덮어쓰지 않음
+      //   (저장 직후 polling 동기화에서 잠깐 비어 보일 수 있음)
+      // - 모달 자동 열기는 "최초 진입에 GRASPS 미작성"인 경우로만 제한
+      //   → 한 번 닫힌 뒤 polling으로 모달이 자동 재오픈되는 버그 방지
       const g = getGraspData(submission);
-      setGraspData(g);
-      if (!g) setShowGraspForm(true);
+      if (g) setGraspData(g);
+      if (!g && !initialLoadDone.current) setShowGraspForm(true);
+      initialLoadDone.current = true;
 
       setState({
         ok: true,
