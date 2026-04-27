@@ -413,6 +413,14 @@
   margin-bottom: 18px;
 }
 
+.classGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
 .classGroupTitle {
   font-family: var(--font-inter), sans-serif;
   font-size: 11px;
@@ -420,7 +428,83 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--primary);
-  padding-left: 4px;
+  padding-left: 0;
+}
+
+.classGroupActions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.exportBtn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--hairline-strong);
+  background: var(--paper-elevated);
+  color: var(--ink);
+  font-family: var(--font-inter), sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.exportBtn:hover:not(:disabled) {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary-light);
+}
+
+.exportBtn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.exportBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.filterChip {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--hairline-strong);
+  background: var(--paper-elevated);
+  color: var(--ink-muted);
+  font-family: var(--font-inter), sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.filterChip:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary-light);
+}
+
+.filterChipOn {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(67, 56, 202, 0.22);
+}
+
+.filterChipOn:hover {
+  background: var(--primary-gradient);
+  color: #ffffff;
 }
 
 .dashTabs {

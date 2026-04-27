@@ -28,6 +28,11 @@ import { GraspSummary } from "@/components/student/GraspSummary";
 import { StudentDashboard } from "@/components/student/StudentDashboard";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import {
+  downloadSubmissionsCsv,
+  downloadSubmissionsPdf,
+  type SubmissionExportRow,
+} from "@/lib/exportSubmissions";
 
 const FEEDBACK_TEMPLATES = [
   "개요에서 세운 논점이 초고에서 어떻게 구체화되었는지 확인해보세요.",
@@ -80,6 +85,9 @@ export default function TeacherAssignmentPage() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectStage, setRejectStage] = useState<Stage>("outline");
   const [showStudentDashboard, setShowStudentDashboard] = useState(false);
+  const [classFilter, setClassFilter] = useState<string>("all");
+  const [exportBusyClassId, setExportBusyClassId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // 실시간 모니터링 자동 새로고침
   useEffect(() => {
@@ -107,20 +115,58 @@ export default function TeacherAssignmentPage() {
 
   const subsByClass = useMemo(() => {
     if (!state.ok) return [];
-    const map = new Map<string, typeof state.subs>();
+    const map = new Map<string, { classId: string; className: string; subs: typeof state.subs }>();
     for (const s of state.subs) {
       const cls = state.db.classes.find((c) => c.id === s.classId);
-      const label = cls?.name || "학급";
-      if (!map.has(label)) map.set(label, []);
-      map.get(label)!.push(s);
+      const className = cls?.name || "학급";
+      const classId = cls?.id || s.classId;
+      if (!map.has(classId)) map.set(classId, { classId, className, subs: [] });
+      map.get(classId)!.subs.push(s);
     }
-    for (const arr of map.values()) {
-      arr.sort((a, b) => a.studentNo.localeCompare(b.studentNo, "ko", { numeric: true }));
+    for (const v of map.values()) {
+      v.subs.sort((a, b) => a.studentNo.localeCompare(b.studentNo, "ko", { numeric: true }));
     }
-    return [...map.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
-      .map(([className, subs]) => ({ className, subs }));
+    return [...map.values()].sort((a, b) =>
+      a.className.localeCompare(b.className, "ko"),
+    );
   }, [state]);
+
+  const visibleGroups = useMemo(() => {
+    if (classFilter === "all") return subsByClass;
+    return subsByClass.filter((g) => g.classId === classFilter);
+  }, [subsByClass, classFilter]);
+
+  async function exportClassSubmissions(
+    group: { classId: string; className: string; subs: Submission[] },
+    format: "csv" | "pdf",
+  ) {
+    if (!state.ok) return;
+    setExportError(null);
+    setExportBusyClassId(group.classId);
+    try {
+      const rows: SubmissionExportRow[] = group.subs.map((s) => ({
+        studentNo: s.studentNo,
+        className: group.className,
+        outlineText: s.outlineText || "",
+        draftText: s.draftText || "",
+        reviseText: s.reviseText || "",
+      }));
+      const base = `${state.assignment.title}_${group.className}_제출물`;
+      if (format === "csv") {
+        await downloadSubmissionsCsv(base, rows);
+      } else {
+        await downloadSubmissionsPdf(base, {
+          assignmentTitle: state.assignment.title,
+          className: group.className,
+          rows,
+        });
+      }
+    } catch (e) {
+      setExportError((e as Error).message || "내보내기에 실패했습니다.");
+    } finally {
+      setExportBusyClassId(null);
+    }
+  }
 
   const selected = useMemo(() => {
     if (!state.ok || !selectedSubmissionId) return null;
@@ -476,10 +522,57 @@ export default function TeacherAssignmentPage() {
               아직 학생 제출 데이터가 없습니다.
             </div>
           ) : (
-            <div className={styles.list}>
-              {subsByClass.map(({ className, subs }) => (
-                <div key={className} className={styles.classGroup}>
-                  <div className={styles.classGroupTitle}>{className}</div>
+            <>
+              {subsByClass.length > 1 ? (
+                <div className={styles.filterRow}>
+                  <button
+                    type="button"
+                    className={[styles.filterChip, classFilter === "all" ? styles.filterChipOn : ""].join(" ")}
+                    onClick={() => setClassFilter("all")}
+                  >
+                    전체 ({state.subs.length})
+                  </button>
+                  {subsByClass.map((g) => (
+                    <button
+                      key={g.classId}
+                      type="button"
+                      className={[styles.filterChip, classFilter === g.classId ? styles.filterChipOn : ""].join(" ")}
+                      onClick={() => setClassFilter(g.classId)}
+                    >
+                      {g.className} ({g.subs.length})
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {exportError ? <div className={styles.error} style={{ marginBottom: 12 }}>{exportError}</div> : null}
+
+              <div className={styles.list}>
+                {visibleGroups.map(({ classId, className, subs }) => (
+                <div key={classId} className={styles.classGroup}>
+                  <div className={styles.classGroupHead}>
+                    <div className={styles.classGroupTitle}>{className}</div>
+                    <div className={styles.classGroupActions}>
+                      <button
+                        type="button"
+                        className={styles.exportBtn}
+                        onClick={() => void exportClassSubmissions({ classId, className, subs }, "csv")}
+                        disabled={exportBusyClassId === classId || subs.length === 0}
+                        title="이 학급의 제출 글을 CSV로 내려받기"
+                      >
+                        {exportBusyClassId === classId ? "…" : "📊 CSV"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.exportBtn}
+                        onClick={() => void exportClassSubmissions({ classId, className, subs }, "pdf")}
+                        disabled={exportBusyClassId === classId || subs.length === 0}
+                        title="이 학급의 제출 글을 PDF로 내려받기"
+                      >
+                        {exportBusyClassId === classId ? "…" : "📄 PDF"}
+                      </button>
+                    </div>
+                  </div>
                   {subs.map((s) => (
                     <button key={s.id} type="button"
                       className={[styles.row, selectedSubmissionId === s.id ? styles.rowActive : ""].join(" ")}
@@ -501,7 +594,8 @@ export default function TeacherAssignmentPage() {
                   ))}
                 </div>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </div>
 
