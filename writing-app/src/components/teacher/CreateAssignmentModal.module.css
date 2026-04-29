@@ -249,6 +249,57 @@
   cursor: pointer;
 }
 
+.criteriaTable {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: var(--radius-md);
+  background: var(--paper-inset);
+  padding: 12px;
+}
+
+.criteriaRow {
+  display: grid;
+  grid-template-columns: 110px 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+
+.criteriaStage {
+  font-family: var(--font-inter), sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  padding-bottom: 8px;
+}
+
+.criteriaField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-transform: none;
+}
+
+.criteriaFieldLabel {
+  font-family: var(--font-inter), sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 720px) {
+  .criteriaRow {
+    grid-template-columns: 1fr 1fr;
+  }
+  .criteriaStage {
+    grid-column: 1 / -1;
+    padding-bottom: 0;
+  }
+}
+
 .error {
   margin-top: 14px;
   background: var(--danger-soft);

@@ -52,6 +52,16 @@ type ViewMode = "write" | "dashboard";
 const TUTOR_W_KEY = "writing-app:tutorWidthPx";
 const TUTOR_H_KEY = "writing-app:tutorHeightPx";
 
+/**
+ * Markdown은 단일 \n을 줄바꿈으로 인식하지 않으므로(같은 단락으로 합침),
+ * 학생이 엔터 한 번으로 줄을 내렸을 때 그대로 보이게 하기 위해
+ * 모든 \n 앞에 trailing two-space(soft break)를 강제로 붙여 렌더링한다.
+ * ※ 이미 두 칸이 있는 줄에도 영향이 없으며 fenced code block은 보존됨.
+ */
+function applySoftBreaks(md: string): string {
+  return md.replace(/(^|[^ \t])([ \t]?)\n/g, (_m, lead, sp) => `${lead}${sp}  \n`);
+}
+
 function stageLabel(stage: Stage) {
   if (stage === "outline") return "1단계: 개요쓰기";
   if (stage === "draft") return "2단계: 초고쓰기";
@@ -724,7 +734,7 @@ export default function WritePage() {
             <div>
               <div className={styles.sectionLabel}>제시문</div>
               <div className={styles.assignmentPrompt}>
-                <ReactMarkdown>{state.assignment.prompt}</ReactMarkdown>
+                <ReactMarkdown>{applySoftBreaks(state.assignment.prompt)}</ReactMarkdown>
               </div>
             </div>
             <div>
@@ -901,11 +911,67 @@ export default function WritePage() {
               const charsWithSpaces = text.length;
               const charsNoSpaces = text.replace(/\s/g, "").length;
               const paragraphs = text.trim() ? text.trim().split(/\n+/).length : 0;
+              const stageCriteria = state.assignment.criteria?.[tab];
+              const minChars = stageCriteria?.minChars;
+              const minParagraphs = stageCriteria?.minParagraphs;
+              const charsMet = minChars != null ? charsWithSpaces >= minChars : null;
+              const paragraphsMet = minParagraphs != null ? paragraphs >= minParagraphs : null;
+              const hasAnyCriteria = minChars != null || minParagraphs != null;
+              const allMet =
+                hasAnyCriteria &&
+                (minChars == null || charsMet === true) &&
+                (minParagraphs == null || paragraphsMet === true);
               return (
                 <div className={styles.statsBar}>
-                  <span>글자수(띄어쓰기 포함): <b>{charsWithSpaces}</b></span>
+                  <span
+                    className={
+                      charsMet == null
+                        ? undefined
+                        : charsMet
+                          ? styles.statMet
+                          : styles.statUnmet
+                    }
+                  >
+                    글자수(띄어쓰기 포함): <b>{charsWithSpaces}</b>
+                    {minChars != null ? (
+                      <>
+                        {" "}/ <b>{minChars}</b>
+                        <span className={styles.statBadge} aria-label={charsMet ? "기준 충족" : "기준 미충족"}>
+                          {charsMet ? "✓ 충족" : "미충족"}
+                        </span>
+                      </>
+                    ) : null}
+                  </span>
                   <span>글자수(띄어쓰기 제외): <b>{charsNoSpaces}</b></span>
-                  <span>문단 수: <b>{paragraphs}</b></span>
+                  <span
+                    className={
+                      paragraphsMet == null
+                        ? undefined
+                        : paragraphsMet
+                          ? styles.statMet
+                          : styles.statUnmet
+                    }
+                  >
+                    문단 수: <b>{paragraphs}</b>
+                    {minParagraphs != null ? (
+                      <>
+                        {" "}/ <b>{minParagraphs}</b>
+                        <span className={styles.statBadge} aria-label={paragraphsMet ? "기준 충족" : "기준 미충족"}>
+                          {paragraphsMet ? "✓ 충족" : "미충족"}
+                        </span>
+                      </>
+                    ) : null}
+                  </span>
+                  {hasAnyCriteria ? (
+                    <span
+                      className={[
+                        styles.statSummary,
+                        allMet ? styles.statSummaryMet : styles.statSummaryUnmet,
+                      ].join(" ")}
+                    >
+                      {allMet ? "단계 정량 기준 충족" : "단계 정량 기준 미충족"}
+                    </span>
+                  ) : null}
                 </div>
               );
             })()}
@@ -925,7 +991,7 @@ export default function WritePage() {
               <div className={styles.noteBox}>
                 <div className={styles.noteTitle}>개요 미리보기</div>
                 <div className={styles.markdownPreview}>
-                  <ReactMarkdown>{currentText("outline")}</ReactMarkdown>
+                  <ReactMarkdown>{applySoftBreaks(currentText("outline"))}</ReactMarkdown>
                 </div>
               </div>
             ) : null}

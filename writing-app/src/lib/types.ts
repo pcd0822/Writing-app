@@ -26,6 +26,22 @@ export const AttachmentSchema = z.object({
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 
+// ── 단계별 정량 기준 (글자수 / 문단 수) ────────────────────────
+export const StageCriteriaSchema = z.object({
+  /** 최소 글자수(공백 포함). 0 또는 undefined면 미설정 */
+  minChars: z.number().int().nonnegative().optional(),
+  /** 최소 문단 수. 0 또는 undefined면 미설정 */
+  minParagraphs: z.number().int().nonnegative().optional(),
+});
+export type StageCriteria = z.infer<typeof StageCriteriaSchema>;
+
+export const AssignmentCriteriaSchema = z.object({
+  outline: StageCriteriaSchema.default({}),
+  draft: StageCriteriaSchema.default({}),
+  revise: StageCriteriaSchema.default({}),
+});
+export type AssignmentCriteria = z.infer<typeof AssignmentCriteriaSchema>;
+
 export const AssignmentSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -33,6 +49,8 @@ export const AssignmentSchema = z.object({
   task: z.string().min(1), // 과제
   attachments: z.array(AttachmentSchema).default([]),
   createdAt: z.number().int(),
+  /** 단계별 정량 기준 (선택) */
+  criteria: AssignmentCriteriaSchema.optional(),
 });
 export type Assignment = z.infer<typeof AssignmentSchema>;
 

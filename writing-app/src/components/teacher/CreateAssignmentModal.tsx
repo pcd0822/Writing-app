@@ -13,7 +13,54 @@ import {
 } from "@/lib/localDb";
 import { uploadAssignmentFileToDrive } from "@/lib/driveAssignmentUpload";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
-import type { AssignmentTarget, Attachment } from "@/lib/types";
+import type { AssignmentCriteria, AssignmentTarget, Attachment } from "@/lib/types";
+
+const STAGE_KEYS = ["outline", "draft", "revise"] as const;
+type StageKey = (typeof STAGE_KEYS)[number];
+const STAGE_LABELS: Record<StageKey, string> = {
+  outline: "1단계 · 개요",
+  draft: "2단계 · 초고",
+  revise: "3단계 · 고쳐쓰기",
+};
+
+type StageCriteriaInput = { minChars: string; minParagraphs: string };
+type CriteriaInput = Record<StageKey, StageCriteriaInput>;
+const EMPTY_CRITERIA: CriteriaInput = {
+  outline: { minChars: "", minParagraphs: "" },
+  draft: { minChars: "", minParagraphs: "" },
+  revise: { minChars: "", minParagraphs: "" },
+};
+
+function parsePositiveInt(v: string): number | undefined {
+  const t = v.trim();
+  if (!t) return undefined;
+  const n = parseInt(t, 10);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+function buildCriteria(input: CriteriaInput): AssignmentCriteria | undefined {
+  const out: AssignmentCriteria = {
+    outline: {},
+    draft: {},
+    revise: {},
+  };
+  let any = false;
+  for (const k of STAGE_KEYS) {
+    const c = input[k];
+    const minChars = parsePositiveInt(c.minChars);
+    const minParagraphs = parsePositiveInt(c.minParagraphs);
+    if (minChars !== undefined) {
+      out[k].minChars = minChars;
+      any = true;
+    }
+    if (minParagraphs !== undefined) {
+      out[k].minParagraphs = minParagraphs;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
+}
 
 type Props = {
   isOpen: boolean;
@@ -27,8 +74,16 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
   const [task, setTask] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
+  const [criteria, setCriteria] = useState<CriteriaInput>(EMPTY_CRITERIA);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function updateCriteria(stage: StageKey, key: keyof StageCriteriaInput, value: string) {
+    setCriteria((prev) => ({
+      ...prev,
+      [stage]: { ...prev[stage], [key]: value.replace(/[^0-9]/g, "") },
+    }));
+  }
 
   const db = useMemo(() => {
     if (typeof window === "undefined") return null;
@@ -131,6 +186,7 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
           })),
         );
       }
+      const builtCriteria = buildCriteria(criteria);
       const assignment = {
         id: assignmentId,
         title: t,
@@ -138,6 +194,7 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
         task: k,
         attachments,
         createdAt: Date.now(),
+        ...(builtCriteria ? { criteria: builtCriteria } : {}),
       };
 
       const dbNow = loadTeacherDb();
@@ -151,6 +208,7 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
       setTask("");
       setFiles([]);
       setSelectedTargets(new Set());
+      setCriteria(EMPTY_CRITERIA);
       onCreated();
       onClose();
     } catch (e) {
@@ -219,6 +277,44 @@ export function CreateAssignmentModal({ isOpen, onClose, onCreated }: Props) {
               placeholder="학생이 수행해야 할 과제 요구사항을 입력하세요."
             />
           </label>
+
+          <div className={styles.label}>
+            <span>단계별 정량 기준 (선택)</span>
+            <div className={styles.hint}>
+              비워두면 미설정. 학생 글쓰기 화면에서 글자수·문단수 충족 여부가 표시됩니다.
+            </div>
+            <div className={styles.criteriaTable}>
+              {STAGE_KEYS.map((s) => (
+                <div key={s} className={styles.criteriaRow}>
+                  <div className={styles.criteriaStage}>{STAGE_LABELS[s]}</div>
+                  <label className={styles.criteriaField}>
+                    <span className={styles.criteriaFieldLabel}>최소 글자수</span>
+                    <input
+                      className={styles.input}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={criteria[s].minChars}
+                      onChange={(e) => updateCriteria(s, "minChars", e.target.value)}
+                      placeholder="예) 300"
+                    />
+                  </label>
+                  <label className={styles.criteriaField}>
+                    <span className={styles.criteriaFieldLabel}>최소 문단 수</span>
+                    <input
+                      className={styles.input}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={criteria[s].minParagraphs}
+                      onChange={(e) => updateCriteria(s, "minParagraphs", e.target.value)}
+                      placeholder="예) 3"
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <label className={styles.label}>
             <span>첨부파일(메타데이터)</span>
