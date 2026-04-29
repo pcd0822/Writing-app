@@ -883,8 +883,21 @@ export default function WritePage() {
             </div>
             <div className={styles.stageToolbarRight}>
               {!approvedNow ? (
-                <button type="button" className={styles.stepBtnPrimary} disabled={submitDisabled} onClick={() => void onSubmitStage(tab)}>
-                  {isSubmitting ? "제출 중..." : "제출하기"}
+                <button
+                  type="button"
+                  className={styles.stepBtnPrimary}
+                  disabled={submitDisabled}
+                  data-loading={isSubmitting ? "true" : undefined}
+                  onClick={() => void onSubmitStage(tab)}
+                >
+                  {isSubmitting ? (
+                    <span className={styles.btnInline}>
+                      <span className={styles.btnSpinner} aria-hidden="true" />
+                      <span>제출 중…</span>
+                    </span>
+                  ) : (
+                    "제출하기"
+                  )}
                 </button>
               ) : null}
               {canShowEdit(tab) ? (

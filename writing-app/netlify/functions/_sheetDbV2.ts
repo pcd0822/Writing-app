@@ -141,11 +141,23 @@ export function mergeChunksIntoDb(
     ? parseKeyFieldChunks(chunks.extraText, ["id", "field", "partIndex", "content"])
     : new Map<string, string>();
 
-  const assignments = slim.assignments.map((a) => ({
-    ...a,
-    prompt: assignParts.get(`${a.id}\tprompt`) ?? "",
-    task: assignParts.get(`${a.id}\ttask`) ?? "",
-  }));
+  const assignments = slim.assignments.map((a) => {
+    const criteriaJson = assignParts.get(`${a.id}\tcriteria`);
+    let criteria = a.criteria;
+    if (criteriaJson) {
+      try {
+        criteria = JSON.parse(criteriaJson);
+      } catch {
+        /* JSON 파싱 실패 시 slim의 값 유지 */
+      }
+    }
+    return {
+      ...a,
+      prompt: assignParts.get(`${a.id}\tprompt`) ?? "",
+      task: assignParts.get(`${a.id}\ttask`) ?? "",
+      ...(criteria ? { criteria } : {}),
+    };
+  });
 
   const submissions = slim.submissions.map((s) => ({
     ...s,
@@ -549,6 +561,10 @@ export function buildChunkSheetValues(db: TeacherDb): {
   for (const a of db.assignments) {
     pushChunks4(a.id, "prompt", a.prompt, assignment_text);
     pushChunks4(a.id, "task", a.task, assignment_text);
+    // 단계별 정량 기준(criteria) — meta JSON이 깨지거나 fallback 경로일 때도 보존되도록 청크에 저장
+    if (a.criteria) {
+      pushChunks4(a.id, "criteria", JSON.stringify(a.criteria), assignment_text);
+    }
   }
   for (const s of db.submissions) {
     pushChunks4(s.id, "outline", s.outlineText, submission_text);

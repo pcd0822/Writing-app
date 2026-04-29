@@ -477,6 +477,32 @@
   transform: translateY(1px) scale(0.98);
 }
 
+.btnInline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btnSpinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2.5px solid currentColor;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  opacity: 0.9;
+  animation: btnSpin 700ms linear infinite;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+@keyframes btnSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .stepBtnSecondary {
   height: 36px;
   padding: 0 14px;
