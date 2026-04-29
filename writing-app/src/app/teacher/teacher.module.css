@@ -359,9 +359,10 @@
   font-size: 12px;
   padding: 5px 10px;
   border-radius: var(--radius-full);
-  background: var(--primary-soft);
-  color: var(--primary);
+  background: var(--warning-soft);
+  color: var(--warning);
   font-weight: 600;
+  border: 1px solid var(--warning-light);
 }
 
 .toolbarRow {
