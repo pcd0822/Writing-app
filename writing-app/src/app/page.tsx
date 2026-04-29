@@ -77,7 +77,7 @@ export default function Home() {
 
         <div className={styles.footer}>
           <span aria-hidden="true" />
-          단계별 작문 · GRASP 맥락 설계 · AI 협력 · 사고 성장 대시보드
+          단계별 작문 · GRASPS 맥락 설계 · AI 협력 · 사고 성장 대시보드
           <span aria-hidden="true" />
         </div>
       </main>

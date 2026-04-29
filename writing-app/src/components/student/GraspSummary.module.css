@@ -9,6 +9,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   font-family: var(--font-inter), sans-serif;
   font-weight: 700;
   font-size: 11px;
@@ -16,6 +17,30 @@
   text-transform: uppercase;
   color: var(--primary);
   margin-bottom: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: default;
+}
+
+.titleClickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  margin: -4px -4px 6px -4px;
+  padding: 4px 4px;
+  transition: background-color 0.15s ease;
+}
+
+.titleClickable:hover {
+  background: var(--primary-soft);
+}
+
+.toggleIcon {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--primary);
+  transition: transform 0.12s ease;
 }
 
 .grid {

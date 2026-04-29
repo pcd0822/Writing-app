@@ -324,7 +324,7 @@ export function EditAssignmentModal({ isOpen, assignmentId, onClose, onSaved }: 
                 <div key={s} className={styles.criteriaRow}>
                   <div className={styles.criteriaStage}>{STAGE_LABELS[s]}</div>
                   <label className={styles.criteriaField}>
-                    <span className={styles.criteriaFieldLabel}>최소 글자수</span>
+                    <span className={styles.criteriaFieldLabel}>최소 글자수(띄어쓰기 포함)</span>
                     <input
                       className={styles.input}
                       type="text"

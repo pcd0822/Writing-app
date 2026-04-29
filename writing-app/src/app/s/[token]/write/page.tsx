@@ -51,6 +51,7 @@ type ViewMode = "write" | "dashboard";
 
 const TUTOR_W_KEY = "writing-app:tutorWidthPx";
 const TUTOR_H_KEY = "writing-app:tutorHeightPx";
+const GRASP_COLLAPSED_KEY = "writing-app:graspCollapsed";
 
 /**
  * Markdown은 단일 \n을 줄바꿈으로 인식하지 않으므로(같은 단락으로 합침),
@@ -134,6 +135,7 @@ export default function WritePage() {
   const [feedbackNoteModalId, setFeedbackNoteModalId] = useState<string | null>(null);
   const [tutorWidth, setTutorWidth] = useState(420);
   const [tutorHeight, setTutorHeight] = useState(900);
+  const [graspCollapsed, setGraspCollapsed] = useState(false);
 
   // 새 상태들
   const [viewMode, setViewMode] = useState<ViewMode>("write");
@@ -237,6 +239,7 @@ export default function WritePage() {
     try {
       const w = localStorage.getItem(TUTOR_W_KEY);
       const h = localStorage.getItem(TUTOR_H_KEY);
+      const gc = localStorage.getItem(GRASP_COLLAPSED_KEY);
       if (w) {
         const n = parseInt(w, 10);
         if (Number.isFinite(n)) setTutorWidth(Math.min(700, Math.max(300, n)));
@@ -247,8 +250,15 @@ export default function WritePage() {
       } else {
         setTutorHeight(Math.max(720, window.innerHeight - 32));
       }
+      if (gc != null) setGraspCollapsed(gc === "1");
     } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GRASP_COLLAPSED_KEY, graspCollapsed ? "1" : "0");
+    } catch { /* ignore */ }
+  }, [graspCollapsed]);
 
   useEffect(() => {
     try { localStorage.setItem(TUTOR_W_KEY, String(tutorWidth)); } catch { /* ignore */ }
@@ -513,7 +523,7 @@ export default function WritePage() {
     }
     // GRASP 필수 체크 (개요 제출 시)
     if (stage === "outline" && !graspData) {
-      setError("개요 제출 전에 GRASP 맥락 설계를 먼저 완료해주세요.");
+      setError("개요 제출 전에 GRASPS 맥락 설계를 먼저 완료해주세요.");
       setShowGraspForm(true);
       return;
     }
@@ -679,7 +689,7 @@ export default function WritePage() {
       </Modal>
 
       {/* GRASP 폼 모달 */}
-      <Modal isOpen={showGraspForm} onClose={() => { if (graspData) setShowGraspForm(false); }} title="GRASP 맥락 설계" size="xl">
+      <Modal isOpen={showGraspForm} onClose={() => { if (graspData) setShowGraspForm(false); }} title="GRASPS 맥락 설계" size="xl">
         <GraspForm initial={graspData} onSave={onGraspSave} />
       </Modal>
 
@@ -718,16 +728,21 @@ export default function WritePage() {
               학생 {studentNo} · {state.cls.name}
             </div>
 
-            {/* GRASP 요약 */}
+            {/* GRASPS 요약 */}
             {graspData ? (
-              <GraspSummary grasp={graspData} onEdit={() => setShowGraspForm(true)} />
+              <GraspSummary
+                grasp={graspData}
+                onEdit={() => setShowGraspForm(true)}
+                collapsed={graspCollapsed}
+                onToggleCollapsed={() => setGraspCollapsed((v) => !v)}
+              />
             ) : (
               <button
                 type="button"
                 className={styles.attachBtn}
                 onClick={() => setShowGraspForm(true)}
               >
-                GRASP 맥락 설계하기
+                GRASPS 맥락 설계하기
               </button>
             )}
 
@@ -775,17 +790,18 @@ export default function WritePage() {
               </div>
             ) : null}
 
-            <div className={styles.sectionLabel} style={{ marginTop: 12 }}>교사 피드백 보기</div>
-            <div className={styles.feedbackPanelTabs}>
-              {(["outline", "draft", "revise", "final"] as const).map((t) => (
-                <button key={t} type="button"
-                  className={[styles.feedbackTabBtn, feedbackPanelTab === t ? styles.feedbackTabBtnOn : ""].join(" ")}
-                  onClick={() => setFeedbackPanelTab(t)}>
-                  {t === "outline" ? "개요" : t === "draft" ? "초고" : t === "revise" ? "고쳐쓰기" : "최종"}
-                </button>
-              ))}
-            </div>
-            <div className={styles.feedbackPanelBody}>
+            <div className={styles.feedbackCard}>
+              <div className={styles.feedbackCardHeader}>교사 피드백 보기</div>
+              <div className={styles.feedbackPanelTabs}>
+                {(["outline", "draft", "revise", "final"] as const).map((t) => (
+                  <button key={t} type="button"
+                    className={[styles.feedbackTabBtn, feedbackPanelTab === t ? styles.feedbackTabBtnOn : ""].join(" ")}
+                    onClick={() => setFeedbackPanelTab(t)}>
+                    {t === "outline" ? "개요" : t === "draft" ? "초고" : t === "revise" ? "고쳐쓰기" : "최종"}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.feedbackPanelBody}>
               {feedbackPanelTab === "final" ? (
                 state.submission.finalReportPublishedAt && state.submission.finalReportSnapshot ? (
                   <FinalStudentReport snap={parseFinalReportSnapshot(state.submission.finalReportSnapshot || "")} />
@@ -805,6 +821,7 @@ export default function WritePage() {
                   </div>
                 </div>
               )}
+              </div>
             </div>
           </div>
         </aside>
@@ -895,7 +912,16 @@ export default function WritePage() {
             <textarea
               className={[styles.editor, tab === "outline" ? styles.mono : ""].join(" ")}
               value={currentText(tab)}
-              onChange={(e) => setText(tab, e.target.value)}
+              onChange={(e) => {
+                setText(tab, e.target.value);
+                if (selection) setSelection(null);
+              }}
+              onMouseDown={() => {
+                if (selection) setSelection(null);
+              }}
+              onKeyDown={() => {
+                if (selection) setSelection(null);
+              }}
               onMouseUp={onEditorMouseUp}
               placeholder={
                 tab === "outline"
@@ -909,18 +935,12 @@ export default function WritePage() {
             {(() => {
               const text = currentText(tab);
               const charsWithSpaces = text.length;
-              const charsNoSpaces = text.replace(/\s/g, "").length;
               const paragraphs = text.trim() ? text.trim().split(/\n+/).length : 0;
               const stageCriteria = state.assignment.criteria?.[tab];
               const minChars = stageCriteria?.minChars;
               const minParagraphs = stageCriteria?.minParagraphs;
               const charsMet = minChars != null ? charsWithSpaces >= minChars : null;
               const paragraphsMet = minParagraphs != null ? paragraphs >= minParagraphs : null;
-              const hasAnyCriteria = minChars != null || minParagraphs != null;
-              const allMet =
-                hasAnyCriteria &&
-                (minChars == null || charsMet === true) &&
-                (minParagraphs == null || paragraphsMet === true);
               return (
                 <div className={styles.statsBar}>
                   <span
@@ -932,17 +952,21 @@ export default function WritePage() {
                           : styles.statUnmet
                     }
                   >
+                    {charsMet != null ? (
+                      <span
+                        className={charsMet ? styles.statCheck : styles.statCheckOff}
+                        aria-label={charsMet ? "기준 충족" : "기준 미충족"}
+                      >
+                        {charsMet ? "✓" : "○"}
+                      </span>
+                    ) : null}
                     글자수(띄어쓰기 포함): <b>{charsWithSpaces}</b>
                     {minChars != null ? (
                       <>
                         {" "}/ <b>{minChars}</b>
-                        <span className={styles.statBadge} aria-label={charsMet ? "기준 충족" : "기준 미충족"}>
-                          {charsMet ? "✓ 충족" : "미충족"}
-                        </span>
                       </>
                     ) : null}
                   </span>
-                  <span>글자수(띄어쓰기 제외): <b>{charsNoSpaces}</b></span>
                   <span
                     className={
                       paragraphsMet == null
@@ -952,26 +976,21 @@ export default function WritePage() {
                           : styles.statUnmet
                     }
                   >
+                    {paragraphsMet != null ? (
+                      <span
+                        className={paragraphsMet ? styles.statCheck : styles.statCheckOff}
+                        aria-label={paragraphsMet ? "기준 충족" : "기준 미충족"}
+                      >
+                        {paragraphsMet ? "✓" : "○"}
+                      </span>
+                    ) : null}
                     문단 수: <b>{paragraphs}</b>
                     {minParagraphs != null ? (
                       <>
                         {" "}/ <b>{minParagraphs}</b>
-                        <span className={styles.statBadge} aria-label={paragraphsMet ? "기준 충족" : "기준 미충족"}>
-                          {paragraphsMet ? "✓ 충족" : "미충족"}
-                        </span>
                       </>
                     ) : null}
                   </span>
-                  {hasAnyCriteria ? (
-                    <span
-                      className={[
-                        styles.statSummary,
-                        allMet ? styles.statSummaryMet : styles.statSummaryUnmet,
-                      ].join(" ")}
-                    >
-                      {allMet ? "단계 정량 기준 충족" : "단계 정량 기준 미충족"}
-                    </span>
-                  ) : null}
                 </div>
               );
             })()}

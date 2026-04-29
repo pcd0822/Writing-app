@@ -56,7 +56,7 @@ export function GraspForm({ initial, onSave, disabled }: Props) {
 
   return (
     <div className={styles.wrap}>
-      <div className={styles.title}>GRASP 맥락 설계</div>
+      <div className={styles.title}>GRASPS 맥락 설계</div>
       <div className={styles.desc}>
         글을 쓰기 전에 아래 6개 항목을 먼저 작성하세요. 이후 모든 단계에서 참조됩니다.
       </div>
@@ -208,7 +208,7 @@ export function GraspForm({ initial, onSave, disabled }: Props) {
         onClick={handleSave}
         disabled={disabled || !canSave}
       >
-        GRASP 설계 완료
+        GRASPS 설계 완료
       </button>
     </div>
   );

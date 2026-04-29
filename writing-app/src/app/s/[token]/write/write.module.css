@@ -171,9 +171,40 @@
   padding: 12px;
   border-radius: var(--radius-md);
   background: var(--paper-inset);
-  max-height: 280px;
+  max-height: 480px;
   overflow: auto;
   color: var(--ink);
+}
+
+.feedbackCard {
+  margin-top: 12px;
+  padding: 12px 12px 14px 12px;
+  border-radius: var(--radius-lg);
+  border: 1.5px solid var(--primary-light);
+  background: linear-gradient(180deg, var(--primary-soft), var(--paper-elevated) 70%);
+  box-shadow: var(--shadow-sm);
+}
+
+.feedbackCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-inter), sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--primary-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.feedbackCardHeader::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--primary);
 }
 
 .feedbackReadonly {
@@ -740,46 +771,31 @@
   color: #b45309;
 }
 
-.statBadge {
-  margin-left: 6px;
-  font-family: var(--font-inter), sans-serif;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 7px;
-  border-radius: var(--radius-full);
-  background: currentColor;
+.statCheck,
+.statCheckOff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.statCheck {
+  background: #15803d;
   color: #ffffff;
 }
 
-.statMet .statBadge {
-  background: #15803d;
-}
-
-.statUnmet .statBadge {
-  background: #b45309;
-}
-
-.statSummary {
-  margin-left: auto;
-  font-family: var(--font-inter), sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-}
-
-.statSummaryMet {
-  background: #dcfce7;
-  color: #166534;
-  border: 1px solid #86efac;
-}
-
-.statSummaryUnmet {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
+.statCheckOff {
+  background: transparent;
+  color: #b45309;
+  border: 1.5px solid #b45309;
+  font-size: 9px;
 }
 
 @media (max-width: 1100px) {
