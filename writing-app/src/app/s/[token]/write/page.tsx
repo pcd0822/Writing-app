@@ -115,6 +115,7 @@ export default function WritePage() {
   const [draftText, setDraftText] = useState("");
   const [reviseText, setReviseText] = useState("");
   const saveTimer = useRef<number | null>(null);
+  const reviseSeededRef = useRef<string | null>(null);
   const [selection, setSelection] = useState<{
     stage: Stage;
     text: string;
@@ -343,6 +344,32 @@ export default function WritePage() {
     if (!state.ok) return;
     setStageEditUnlocked({ outline: false, draft: false, revise: false });
   }, [state.ok, state.ok ? state.submission.id : null]);
+
+  // 고쳐쓰기 단계 자동 인계: 교사가 초고를 승인했고 학생이 아직 고쳐쓰기를 시작하지 않았다면
+  // 초고 텍스트(draftText)를 reviseText의 시작점으로 자동 복사한다.
+  // submission.id 단위로 한 번만 트리거 — 학생이 의도적으로 비우면 다시 채우지 않는다.
+  useEffect(() => {
+    if (!state.ok) return;
+    const subId = state.submission.id;
+    if (reviseSeededRef.current === subId) return;
+    if (!state.submission.draftApprovedAt) return;
+    if ((state.submission.reviseText || "").length > 0) {
+      reviseSeededRef.current = subId;
+      return;
+    }
+    const seed = state.submission.draftText || "";
+    if (!seed.trim()) {
+      reviseSeededRef.current = subId;
+      return;
+    }
+    reviseSeededRef.current = subId;
+    setReviseText(seed);
+    persist("revise", seed);
+  }, [
+    state.ok,
+    state.ok ? state.submission.id : null,
+    state.ok ? state.submission.draftApprovedAt : null,
+  ]);
 
   function bumpDb() {
     setDbBump((v) => v + 1);
