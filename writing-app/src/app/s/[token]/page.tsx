@@ -1,12 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import styles from "./share.module.css";
 import { Button } from "@/components/ui/Button";
 import { findShare, isShareActive, loadTeacherDb, saveTeacherDb } from "@/lib/localDb";
 import type { TeacherDb } from "@/lib/types";
 import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+
+type ShareState =
+  | {
+      ok: true;
+      share: NonNullable<ReturnType<typeof findShare>>;
+      assignment: TeacherDb["assignments"][number] | null;
+      allocation: TeacherDb["allocations"][number] | null;
+      db: TeacherDb;
+    }
+  | { ok: false; reason: "missing" | "notfound" | "expired" | "error" };
 
 export default function ShareLandingPage() {
   const params = useParams<{ token: string }>();
@@ -17,21 +27,71 @@ export default function ShareLandingPage() {
   const [studentCode, setStudentCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  // null = 아직 검증 중(로딩). 시트 동기화가 끝난 뒤에만 invalid 판정을 내려야
+  // 다른 디바이스에서도 공유 링크가 정상 동작한다.
+  const [shareState, setShareState] = useState<ShareState | null>(null);
 
-  const shareState = useMemo(() => {
-    if (!token) return { ok: false as const, reason: "missing" };
-    try {
-      const db = loadTeacherDb();
-      const share = findShare(db, token);
-      if (!share) return { ok: false as const, reason: "notfound" };
-      if (!isShareActive(share)) return { ok: false as const, reason: "expired" };
-      const assignment = db.assignments.find((a) => a.id === share.assignmentId) || null;
-      const allocation =
-        db.allocations.find((x) => x.assignmentId === share.assignmentId) || null;
-      return { ok: true as const, share, assignment, allocation, db };
-    } catch {
-      return { ok: false as const, reason: "error" };
+  useEffect(() => {
+    let cancelled = false;
+
+    function validateFromLocal(): ShareState | null {
+      if (!token) return { ok: false, reason: "missing" };
+      try {
+        const db = loadTeacherDb();
+        const share = findShare(db, token);
+        if (!share) return null;
+        if (!isShareActive(share)) return { ok: false, reason: "expired" };
+        const assignment = db.assignments.find((a) => a.id === share.assignmentId) || null;
+        const allocation =
+          db.allocations.find((x) => x.assignmentId === share.assignmentId) || null;
+        return { ok: true, share, assignment, allocation, db };
+      } catch {
+        return { ok: false, reason: "error" };
+      }
     }
+
+    async function resolve() {
+      // 1) 로컬 DB로 먼저 시도 (교사 본인 디바이스 fast-path)
+      const local = validateFromLocal();
+      if (local && local.ok) {
+        if (!cancelled) setShareState(local);
+        return;
+      }
+      if (local && !local.ok && local.reason !== "notfound") {
+        if (!cancelled) setShareState(local);
+        return;
+      }
+
+      // 2) 로컬에 없으면 URL의 sid로 원격 시트 동기화 후 재검증
+      const sidFromUrl =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("sid")
+          : null;
+      if (sidFromUrl) {
+        try {
+          setActiveSpreadsheetId(sidFromUrl);
+          const remote = await pullDbFromSheet(sidFromUrl);
+          if (cancelled) return;
+          if (remote) {
+            saveTeacherDb(remote as TeacherDb);
+            const after = validateFromLocal();
+            if (cancelled) return;
+            setShareState(after ?? { ok: false, reason: "notfound" });
+            return;
+          }
+        } catch {
+          if (!cancelled) setShareState({ ok: false, reason: "error" });
+          return;
+        }
+      }
+
+      if (!cancelled) setShareState({ ok: false, reason: "notfound" });
+    }
+
+    resolve();
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   async function onEnter() {
@@ -133,13 +193,13 @@ export default function ShareLandingPage() {
         <div className={styles.header}>
           <div className={styles.title}>과제 작성 시작</div>
           <div className={styles.sub}>
-            {shareState.ok && shareState.assignment
+            {shareState && shareState.ok && shareState.assignment
               ? `과제: ${shareState.assignment.title}`
               : "공유 링크 확인 중…"}
           </div>
         </div>
 
-        {!shareState.ok ? (
+        {shareState === null ? null : !shareState.ok ? (
           <div className={styles.errorBox}>
             {shareState.reason === "expired"
               ? "이 공유 링크는 만료되었습니다. 교사에게 새 링크를 요청하세요."
