@@ -9,9 +9,15 @@ import {
   deleteAssignment,
   deleteClass,
   loadTeacherDb,
+  mergeTeacherDbs,
   saveTeacherDb,
 } from "@/lib/localDb";
-import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+import {
+  flushPendingPush,
+  pullDbFromSheet,
+  pushDbToSheet,
+  setActiveSpreadsheetId,
+} from "@/lib/spreadsheetSync";
 import type { TeacherDb } from "@/lib/types";
 import styles from "./teacher.module.css";
 import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModal";
@@ -123,7 +129,13 @@ export default function TeacherPage() {
     setDbVersion((v) => v + 1);
   }
 
-  /** 시트에서 원격 DB를 가져와 로컬에 저장 (push는 생략하여 race 방지) */
+  /**
+   * 시트에서 원격 DB를 가져와 로컬과 양방향으로 머지하고, 머지된 결과를 시트에
+   * 다시 push해 모든 디바이스가 같은 상태에 수렴하도록 한다.
+   *  - 단순 덮어쓰기는 로컬에만 있는 미푸시 변경(방금 만든 과제 등)을 잃게 한다.
+   *  - 진행 중인 코얼레싱 push가 있으면 먼저 끝낸 뒤 pull → 우리 baseline에
+   *    내가 방금 만든 변경이 빠지지 않게 한다.
+   */
   async function syncFromSheet(silent = false) {
     if (typeof window === "undefined") return;
     const sid = loadTeacherSettings()?.spreadsheetId;
@@ -135,24 +147,52 @@ export default function TeacherPage() {
     setSyncStatus(null);
     try {
       setActiveSpreadsheetId(sid);
+      // 진행 중인 변경을 먼저 시트에 반영해야 다른 디바이스가 가져갈 수 있다.
+      await flushPendingPush(sid);
       const remote = await pullDbFromSheet(sid);
       if (remote) {
         const remoteDb = remote as TeacherDb;
-        saveTeacherDb(remoteDb, { skipRemotePush: true });
-        const totalStudents = (remoteDb.classes || []).reduce(
+        const local = loadTeacherDb();
+        const merged = mergeTeacherDbs(local, remoteDb);
+        // 머지 결과를 로컬에 반영하고 시트에도 push해 양쪽이 같은 상태로 수렴.
+        saveTeacherDb(merged, { skipRemotePush: true });
+        try {
+          await pushDbToSheet(sid, merged, { skipPullMerge: true });
+        } catch (e) {
+          console.warn("[Writing app] sync post-push failed:", e);
+        }
+        const totalStudents = (merged.classes || []).reduce(
           (sum, c) => sum + (c.students?.length || 0),
           0,
         );
         setSyncStatus({
           kind: "ok",
-          msg: `시트에서 가져옴 — 학급 ${remoteDb.classes?.length || 0}개 · 학생 ${totalStudents}명 · 과제 ${remoteDb.assignments?.length || 0}개`,
+          msg: `시트와 양방향 동기화 완료 — 학급 ${merged.classes?.length || 0}개 · 학생 ${totalStudents}명 · 과제 ${merged.assignments?.length || 0}개`,
         });
         refreshDb();
       } else {
-        setSyncStatus({
-          kind: "empty",
-          msg: "시트에 저장된 데이터가 없습니다. (다른 디바이스에서 한 번도 저장되지 않았거나 시트 ID가 다를 수 있습니다)",
-        });
+        // 시트가 비어 있으면 로컬을 시트로 일괄 업로드(첫 사용자 시나리오).
+        const local = loadTeacherDb();
+        const hasLocalData =
+          (local.classes?.length || 0) > 0 ||
+          (local.assignments?.length || 0) > 0 ||
+          (local.submissions?.length || 0) > 0;
+        if (hasLocalData) {
+          try {
+            await pushDbToSheet(sid, local, { skipPullMerge: true });
+            setSyncStatus({
+              kind: "ok",
+              msg: "시트가 비어 있어 로컬 데이터를 시트로 업로드했습니다.",
+            });
+          } catch (e) {
+            setSyncStatus({ kind: "err", msg: (e as Error).message || "업로드 실패" });
+          }
+        } else {
+          setSyncStatus({
+            kind: "empty",
+            msg: "시트에 저장된 데이터가 없습니다. (다른 디바이스에서 한 번도 저장되지 않았거나 시트 ID가 다를 수 있습니다)",
+          });
+        }
       }
     } catch (e) {
       setSyncStatus({ kind: "err", msg: (e as Error).message || "동기화 실패" });
@@ -205,16 +245,46 @@ export default function TeacherPage() {
     });
   }
 
-  function onConfirmDelete() {
+  /**
+   * union 머지 모델에서는 단순히 로컬에서 삭제만 하면, 다음 push의 pull-merge에서
+   * 시트에 있던 항목이 되살아난다. 그래서 삭제 시점에 직접 pull→merge→삭제→push
+   * 를 명시적으로 수행해 시트에서도 즉시 사라지게 한다.
+   */
+  async function onConfirmDelete() {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      const current = loadTeacherDb();
+      const sid = loadTeacherSettings()?.spreadsheetId;
+
+      let base = loadTeacherDb();
+      if (sid) {
+        try {
+          await flushPendingPush(sid);
+          const remote = await pullDbFromSheet(sid);
+          if (remote) base = mergeTeacherDbs(base, remote as TeacherDb);
+        } catch (e) {
+          console.warn("[Writing app] delete pre-pull failed:", e);
+        }
+      }
+
       const next =
         deleteTarget.kind === "class"
-          ? deleteClass(current, deleteTarget.id)
-          : deleteAssignment(current, deleteTarget.id);
-      saveTeacherDb(next);
+          ? deleteClass(base, deleteTarget.id)
+          : deleteAssignment(base, deleteTarget.id);
+
+      saveTeacherDb(next, { skipRemotePush: true });
+      if (sid) {
+        try {
+          await pushDbToSheet(sid, next, { skipPullMerge: true });
+        } catch (e) {
+          console.error("[Writing app] delete push failed:", e);
+          setSyncStatus({
+            kind: "err",
+            msg: "삭제는 로컬에 반영됐지만 시트 반영이 실패했습니다. 동기화를 다시 눌러주세요.",
+          });
+        }
+      }
+
       if (deleteTarget.kind === "class" && selectedClassId === deleteTarget.id) {
         setSelectedClassId(null);
       }

@@ -13,7 +13,10 @@ export async function ensureWorkbookStructure(spreadsheetId: string) {
   if (ensuredWorkbooks.has(spreadsheetId)) return;
 
   const sheets = getSheetsClient();
-  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const meta = await sheets.spreadsheets.get(
+    { spreadsheetId },
+    { timeout: 8500 },
+  );
   const existing = new Set((meta.data.sheets || []).map((s) => s.properties?.title));
 
   const wanted = [
@@ -43,13 +46,16 @@ export async function ensureWorkbookStructure(spreadsheetId: string) {
     return;
   }
 
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: toAdd.map((title) => ({
-        addSheet: { properties: { title } },
-      })),
+  await sheets.spreadsheets.batchUpdate(
+    {
+      spreadsheetId,
+      requestBody: {
+        requests: toAdd.map((title) => ({
+          addSheet: { properties: { title } },
+        })),
+      },
     },
-  });
+    { timeout: 8500 },
+  );
   ensuredWorkbooks.add(spreadsheetId);
 }

@@ -8,10 +8,11 @@ import { callFunction } from "@/lib/netlifyClient";
 import { loadTeacherSettings, saveTeacherSettings } from "@/lib/teacherSettings";
 import {
   pullDbFromSheetWithDiag,
+  pushDbToSheet,
   setActiveSpreadsheetId,
   type PullDiag,
 } from "@/lib/spreadsheetSync";
-import { saveTeacherDb } from "@/lib/localDb";
+import { loadTeacherDb, mergeTeacherDbs, saveTeacherDb } from "@/lib/localDb";
 import type { TeacherDb } from "@/lib/types";
 
 type Props = {
@@ -58,23 +59,56 @@ export function SpreadsheetSetupModal({ isOpen, onClose, onSaved }: Props) {
       });
       setActiveSpreadsheetId(id);
 
-      // 3) 시트의 기존 DB를 가져와 로컬에 저장 (push는 생략 — race 방지)
+      // 3) 시트의 기존 DB를 가져와 로컬과 머지 후 시트에도 push해 양쪽 수렴.
+      //    단순 덮어쓰기는 디바이스에 미푸시로 남아 있던 과제·학급을 잃게 한다.
       const result = await pullDbFromSheetWithDiag(id);
+      const local = loadTeacherDb();
       if (result.db) {
-        const db = result.db as TeacherDb;
-        saveTeacherDb(db, { skipRemotePush: true });
-        const totalStudents = (db.classes || []).reduce(
+        const remoteDb = result.db as TeacherDb;
+        const merged = mergeTeacherDbs(local, remoteDb);
+        saveTeacherDb(merged, { skipRemotePush: true });
+        // 로컬에만 있던 항목을 시트에도 정착(다른 디바이스에서 보이도록).
+        try {
+          await pushDbToSheet(id, merged, { skipPullMerge: true });
+        } catch (e) {
+          console.warn("[Writing app] sheet-setup post-push failed:", e);
+        }
+        const totalStudents = (merged.classes || []).reduce(
           (sum, c) => sum + (c.students?.length || 0),
           0,
         );
         setSuccess({
-          classes: db.classes?.length || 0,
+          classes: merged.classes?.length || 0,
           students: totalStudents,
-          assignments: db.assignments?.length || 0,
-          submissions: db.submissions?.length || 0,
+          assignments: merged.assignments?.length || 0,
+          submissions: merged.submissions?.length || 0,
         });
       } else {
-        setEmptyNotice(result.diag ?? true);
+        // 시트가 비어 있다면 로컬에 이미 있는 데이터를 시트로 업로드.
+        const hasLocalData =
+          (local.classes?.length || 0) > 0 ||
+          (local.assignments?.length || 0) > 0 ||
+          (local.submissions?.length || 0) > 0;
+        if (hasLocalData) {
+          try {
+            await pushDbToSheet(id, local, { skipPullMerge: true });
+            const totalStudents = (local.classes || []).reduce(
+              (sum, c) => sum + (c.students?.length || 0),
+              0,
+            );
+            setSuccess({
+              classes: local.classes?.length || 0,
+              students: totalStudents,
+              assignments: local.assignments?.length || 0,
+              submissions: local.submissions?.length || 0,
+            });
+          } catch (e) {
+            console.warn("[Writing app] sheet-setup empty-sheet upload failed:", e);
+            setEmptyNotice(result.diag ?? true);
+          }
+        } else {
+          setEmptyNotice(result.diag ?? true);
+        }
       }
 
       onSaved();

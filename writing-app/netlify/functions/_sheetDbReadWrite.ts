@@ -15,6 +15,14 @@ import { TeacherDbSchema } from "../../src/lib/types";
 
 const CLEAR_SUFFIX = "!A1:Z50000";
 
+/**
+ * Google Sheets 호출이 무한 대기하지 않도록 transport-level timeout. Netlify
+ * 무료 플랜의 함수 timeout은 10초이므로 그보다 짧게 설정해서, 시트가 느릴 때
+ * lambda 자체가 죽어 502가 나는 대신 우리 핸들러가 catch해 500을 반환하게 한다.
+ */
+const SHEETS_RPC_TIMEOUT_MS = 8500;
+const SHEETS_RPC_OPTS = { timeout: SHEETS_RPC_TIMEOUT_MS } as const;
+
 /** v2 저장 시 한 번에 비울 범위(이전 행 잔여 제거) */
 export function clearDataRanges(): string[] {
   return [
@@ -91,10 +99,13 @@ export async function readTeacherDbFromSpreadsheet(
     "scores!A:F",
   ];
 
-  const res = await sheets.spreadsheets.values.batchGet({
-    spreadsheetId,
-    ranges,
-  });
+  const res = await sheets.spreadsheets.values.batchGet(
+    {
+      spreadsheetId,
+      ranges,
+    },
+    SHEETS_RPC_OPTS,
+  );
 
   const valueRanges = res.data.valueRanges || [];
   const metaCell = valueRanges[0]?.values?.[0]?.[0] as string | undefined;
@@ -185,10 +196,13 @@ export async function writeTeacherDbToSpreadsheet(
   const chunks = buildChunkSheetValues(validated);
   const tab = buildTabularSheetValues(validated);
 
-  await sheets.spreadsheets.values.batchClear({
-    spreadsheetId,
-    requestBody: { ranges: clearDataRanges() },
-  });
+  await sheets.spreadsheets.values.batchClear(
+    {
+      spreadsheetId,
+      requestBody: { ranges: clearDataRanges() },
+    },
+    SHEETS_RPC_OPTS,
+  );
 
   const data: { range: string; values: string[][] }[] = [
     { range: "meta!A1", values: [[metaStr]] },
@@ -209,11 +223,14 @@ export async function writeTeacherDbToSpreadsheet(
     { range: "scores!A1", values: tab.scores },
   ];
 
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      valueInputOption: "RAW",
-      data,
+  await sheets.spreadsheets.values.batchUpdate(
+    {
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: "RAW",
+        data,
+      },
     },
-  });
+    SHEETS_RPC_OPTS,
+  );
 }

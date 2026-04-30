@@ -39,9 +39,36 @@ export async function pullDbFromSheetWithDiag(spreadsheetId: string): Promise<Pu
   return await callFunction<PullResult>("db-get", { spreadsheetId });
 }
 
-export async function pushDbToSheet(spreadsheetId: string, db: unknown) {
-  const payload = prepareDbForSheetPush(db as TeacherDb);
+export async function pushDbToSheet(
+  spreadsheetId: string,
+  db: unknown,
+  options?: { skipPullMerge?: boolean },
+): Promise<TeacherDb> {
+  /**
+   * 같은 시트를 두 교사가 공유 사용할 때, 한쪽의 push가 상대방의 변경을 통째로
+   * 덮어쓰지 않도록 push 직전에 시트를 pull하여 union 머지한 결과를 push한다.
+   *
+   * pull 실패(네트워크 단절·시트 빈 상태) 시에는 머지 없이 로컬만 push하여
+   * 한쪽 디바이스라도 동작하도록 fail-soft.
+   *
+   * 호출자가 이미 명시적으로 머지했다면 `skipPullMerge: true`로 중복 라운드트립
+   * 을 줄일 수 있다.
+   */
+  let toPush = db as TeacherDb;
+  if (!options?.skipPullMerge) {
+    try {
+      const remote = await callFunction<PullResult>("db-get", { spreadsheetId });
+      if (remote.db) {
+        const { mergeTeacherDbs } = await import("./localDb");
+        toPush = mergeTeacherDbs(toPush, remote.db as TeacherDb);
+      }
+    } catch (err) {
+      console.warn("[Writing app] pre-push pull failed; pushing local only:", err);
+    }
+  }
+  const payload = prepareDbForSheetPush(toPush);
   await callFunction<{ ok: true }>("db-set", { spreadsheetId, db: payload });
+  return toPush;
 }
 
 /**
@@ -84,6 +111,22 @@ async function runPendingPush(spreadsheetId: string) {
   pushPending.delete(spreadsheetId);
 
   const promise = pushDbToSheet(spreadsheetId, latest)
+    .then(async (merged) => {
+      // 머지된 결과를 로컬에도 흡수해서 다른 교사가 추가한 항목이 다음 화면 갱신에
+      // 보이도록 한다. 단, 코얼레싱 도중 사용자가 또 입력했을 수 있어 현재 로컬과
+      // 다시 머지(updatedAt 큰 쪽 우선 규칙으로 사용자 입력 보존).
+      if (typeof window === "undefined") return;
+      try {
+        const { loadTeacherDb, saveTeacherDb, mergeTeacherDbs } = await import(
+          "./localDb"
+        );
+        const cur = loadTeacherDb();
+        const final = mergeTeacherDbs(cur, merged);
+        saveTeacherDb(final, { skipRemotePush: true });
+      } catch (err) {
+        console.warn("[Writing app] post-push local merge failed:", err);
+      }
+    })
     .catch((err) => {
       console.error("[Writing app] coalesced pushDbToSheet failed:", err);
     })

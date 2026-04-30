@@ -2,9 +2,23 @@
   command = "npm run build"
   publish = ".next"
 
+[build.environment]
+  # googleapis는 Node 18+가 필요하고 22 LTS가 권장. 명시하지 않으면 빌더가
+  # 오래된 Node로 떨어져 cold start init이 느려질 수 있음.
+  NODE_VERSION = "22"
+
 [functions]
   directory = "netlify/functions"
+  node_bundler = "esbuild"
+  # googleapis는 패키지가 매우 커서 esbuild로 inline하면 함수 번들이 비대해지고
+  # cold start init이 10초를 넘겨 502가 난다. external로 빼면 Netlify가 자동으로
+  # 함수 옆에 node_modules를 포함시키고 require()는 콜드 스타트 후 lazy 로드된다.
+  external_node_modules = [
+    "googleapis",
+    "google-auth-library",
+    "gaxios",
+    "gtoken",
+  ]
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
-

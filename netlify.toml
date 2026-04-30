@@ -1,4 +1,5 @@
-# App lives in ./writing-app
+# Netlify는 base 디렉터리를 결정한 뒤 그 안의 netlify.toml로 빌드/함수 설정을 읽는다.
+# 실제 설정은 writing-app/netlify.toml에 모여 있다.
 
 [build]
   base = "writing-app"
@@ -7,4 +8,3 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
-

@@ -166,7 +166,7 @@ export function ShareAssignmentModal({
 
       if (sid) {
         try {
-          await pushDbToSheet(sid, next);
+          await pushDbToSheet(sid, next, { skipPullMerge: true });
         } catch (e) {
           console.error("[Writing app] share push failed:", e);
           setError("시트 반영에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.");
@@ -205,7 +205,7 @@ export function ShareAssignmentModal({
       // 폐기는 학생 접근을 즉시 끊어야 하므로 코얼레싱이 아닌 직접 푸시.
       if (sid) {
         try {
-          await pushDbToSheet(sid, next);
+          await pushDbToSheet(sid, next, { skipPullMerge: true });
         } catch (e) {
           console.error("[Writing app] revoke push failed:", e);
           setError("시트 반영에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.");

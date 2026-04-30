@@ -363,6 +363,133 @@ export function mergeRemoteSharesIntoLocalDb(
   return { ...local, shares: mergeShares(local.shares, remote.shares) };
 }
 
+// ── 전체 DB 양방향 머지 ────────────────────────────────────────
+//
+// 두 교사가 같은 시트를 공유 사용할 때, 각자 자기 로컬 DB를 시트에 push하면
+// 한쪽이 다른 쪽의 변경(과제·학급·제출 등)을 통째로 덮어쓴다. 이를 막기 위해
+// push/pull 시점마다 두 DB를 id 기반 union으로 머지한다.
+//
+// 우선순위 규칙:
+//  - 한쪽에만 있는 항목은 그대로 보존(union)
+//  - 충돌(같은 id) 시 기본은 local 우선(사용자가 방금 한 변경을 보존)
+//  - submissions: updatedAt 더 큰 쪽
+//  - feedbackNote/teacherComment: resolvedAt/readAt이 있는 쪽 우선
+//  - score: createdAt 더 큰 쪽
+//  - share: 별도 mergeShares 규칙(만료 늦은 쪽·폐기 빠른 쪽)
+//  - allocation/class students: targets/students 배열 내 union
+//
+// 삭제는 union 모델에서 "되살아남" 위험이 있다. 다행히 삭제는 즉시 push하므로
+// 다른 디바이스가 다음 동기화에서 그 결과를 받는다.
+
+function mergeBy<T>(
+  local: T[],
+  remote: T[],
+  keyFn: (x: T) => string,
+  pickConflict: (l: T, r: T) => T = (l) => l,
+): T[] {
+  const map = new Map<string, T>();
+  for (const x of remote) map.set(keyFn(x), x);
+  for (const x of local) {
+    const k = keyFn(x);
+    const r = map.get(k);
+    map.set(k, r ? pickConflict(x, r) : x);
+  }
+  return Array.from(map.values());
+}
+
+function mergeById<T extends { id: string }>(
+  local: T[],
+  remote: T[],
+  pickConflict: (l: T, r: T) => T = (l) => l,
+): T[] {
+  return mergeBy(local, remote, (x) => x.id, pickConflict);
+}
+
+function mergeClasses(local: ClassRoom[], remote: ClassRoom[]): ClassRoom[] {
+  const map = new Map<string, ClassRoom>();
+  for (const c of remote) map.set(c.id, c);
+  for (const c of local) {
+    const r = map.get(c.id);
+    if (!r) {
+      map.set(c.id, c);
+      continue;
+    }
+    const seen = new Set<string>();
+    const students: ClassRoom["students"] = [];
+    for (const s of [...c.students, ...r.students]) {
+      if (seen.has(s.studentNo)) continue;
+      seen.add(s.studentNo);
+      students.push(s);
+    }
+    map.set(c.id, {
+      id: c.id,
+      name: c.name || r.name,
+      createdAt: Math.min(c.createdAt, r.createdAt),
+      students,
+    });
+  }
+  return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function mergeAllocations(
+  local: AssignmentAllocation[],
+  remote: AssignmentAllocation[],
+): AssignmentAllocation[] {
+  const map = new Map<string, AssignmentAllocation>();
+  for (const a of remote) map.set(a.assignmentId, a);
+  for (const a of local) {
+    const r = map.get(a.assignmentId);
+    if (!r) {
+      map.set(a.assignmentId, a);
+      continue;
+    }
+    const seen = new Set<string>();
+    const targets: AssignmentAllocation["targets"] = [];
+    for (const t of [...a.targets, ...r.targets]) {
+      const key =
+        t.type === "class" ? `c:${t.classId}` : `s:${t.classId}:${t.studentNo}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(t);
+    }
+    map.set(a.assignmentId, { assignmentId: a.assignmentId, targets });
+  }
+  return Array.from(map.values());
+}
+
+export function mergeTeacherDbs(local: TeacherDb, remote: TeacherDb): TeacherDb {
+  return {
+    version: local.version,
+    classes: mergeClasses(local.classes, remote.classes),
+    // 과제는 updatedAt이 없어 비교 불가 → local 우선(사용자의 최근 입력 보존).
+    assignments: mergeById(local.assignments, remote.assignments),
+    allocations: mergeAllocations(local.allocations, remote.allocations),
+    shares: mergeShares(local.shares, remote.shares),
+    submissions: mergeById(local.submissions, remote.submissions, (l, r) =>
+      l.updatedAt >= r.updatedAt ? l : r,
+    ),
+    feedbackNotes: mergeById(local.feedbackNotes, remote.feedbackNotes, (l, r) => {
+      if (l.resolvedAt != null && r.resolvedAt == null) return l;
+      if (r.resolvedAt != null && l.resolvedAt == null) return r;
+      return l;
+    }),
+    aiLogs: mergeById(local.aiLogs, remote.aiLogs),
+    scores: mergeBy(
+      local.scores,
+      remote.scores,
+      (s) => s.submissionId,
+      (l, r) => (l.createdAt >= r.createdAt ? l : r),
+    ),
+    stepTransitions: mergeById(local.stepTransitions, remote.stepTransitions),
+    aiInteractions: mergeById(local.aiInteractions, remote.aiInteractions),
+    teacherComments: mergeById(local.teacherComments, remote.teacherComments, (l, r) => {
+      if (l.readAt != null && r.readAt == null) return l;
+      if (r.readAt != null && l.readAt == null) return r;
+      return l;
+    }),
+  };
+}
+
 /** 시트에서 최신 shares만 가져와 로컬에 머지(다른 교사의 활성 공유 인지용). */
 export async function mergeRemoteSharesFromSheet(
   spreadsheetId?: string | null,
