@@ -2,7 +2,16 @@ import { getSheetsClient } from "./_googleAuth";
 
 export { getSheetsClient } from "./_googleAuth";
 
+/**
+ * 워밍업된 Lambda 인스턴스에서 동일 스프레드시트에 대해 ensureWorkbookStructure를
+ * 다시 호출할 필요가 없도록 process-local 캐시. 시트 추가는 멱등적이고 외부에서
+ * 시트가 삭제되어도 다음 콜드 스타트에서 다시 검증되므로 안전.
+ */
+const ensuredWorkbooks = new Set<string>();
+
 export async function ensureWorkbookStructure(spreadsheetId: string) {
+  if (ensuredWorkbooks.has(spreadsheetId)) return;
+
   const sheets = getSheetsClient();
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const existing = new Set((meta.data.sheets || []).map((s) => s.properties?.title));
@@ -29,7 +38,10 @@ export async function ensureWorkbookStructure(spreadsheetId: string) {
   ];
 
   const toAdd = wanted.filter((t) => !existing.has(t));
-  if (toAdd.length === 0) return;
+  if (toAdd.length === 0) {
+    ensuredWorkbooks.add(spreadsheetId);
+    return;
+  }
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -39,4 +51,5 @@ export async function ensureWorkbookStructure(spreadsheetId: string) {
       })),
     },
   });
+  ensuredWorkbooks.add(spreadsheetId);
 }

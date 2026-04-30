@@ -19,7 +19,7 @@ import { normalizeDriveAttachmentsInDb } from "./attachments";
 import {
   getActiveSpreadsheetId,
   pullDbFromSheet,
-  pushDbToSheet,
+  pushDbToSheetCoalesced,
   setActiveSpreadsheetId,
 } from "./spreadsheetSync";
 
@@ -179,9 +179,7 @@ export function saveTeacherDb(
     (options?.spreadsheetId && String(options.spreadsheetId).trim()) ||
     getActiveSpreadsheetId();
   if (pushId) {
-    void pushDbToSheet(pushId, normalized).catch((err) => {
-      console.error("[Writing app] pushDbToSheet failed:", err);
-    });
+    pushDbToSheetCoalesced(pushId, normalized);
   }
 }
 
@@ -320,6 +318,68 @@ export function findShare(db: TeacherDb, token: string) {
 export function isShareActive(share: ShareLink) {
   if (share.revokedAt) return false;
   return Date.now() < share.expiresAt;
+}
+
+/**
+ * 두 교사가 같은 시트에 공유 토큰을 만들 때 한쪽이 다른 쪽의 토큰을 덮어쓰지
+ * 않도록 토큰 기준 union으로 합친다. revoke 상태는 둘 중 먼저 폐기된 쪽을 우선.
+ */
+export function mergeShares(a: ShareLink[], b: ShareLink[]): ShareLink[] {
+  const byToken = new Map<string, ShareLink>();
+  for (const s of a) byToken.set(s.token, s);
+  for (const s of b) {
+    const cur = byToken.get(s.token);
+    if (!cur) {
+      byToken.set(s.token, s);
+      continue;
+    }
+    const curRev = cur.revokedAt ?? null;
+    const newRev = s.revokedAt ?? null;
+    let revokedAt: number | null;
+    if (curRev != null && newRev != null) revokedAt = Math.min(curRev, newRev);
+    else revokedAt = curRev ?? newRev;
+    // 만료 시각은 둘 중 더 늦은(=더 관대한) 값을 채택해 학생 접근을 끊지 않는다.
+    const expiresAt = Math.max(cur.expiresAt, s.expiresAt);
+    byToken.set(s.token, {
+      ...cur,
+      ...s,
+      revokedAt,
+      expiresAt,
+      // createdAt은 더 빠른 쪽 유지(원본 생성 시각이 의미 있음)
+      createdAt: Math.min(cur.createdAt, s.createdAt),
+    });
+  }
+  return Array.from(byToken.values()).sort((x, y) => y.createdAt - x.createdAt);
+}
+
+/**
+ * 원격 시트의 shares만 로컬 DB에 합쳐 반환. 다른 필드는 로컬 그대로 유지하므로
+ * 사용자의 진행 중 작업이나 미푸시 변경을 잃지 않는다.
+ */
+export function mergeRemoteSharesIntoLocalDb(
+  local: TeacherDb,
+  remote: TeacherDb,
+): TeacherDb {
+  return { ...local, shares: mergeShares(local.shares, remote.shares) };
+}
+
+/** 시트에서 최신 shares만 가져와 로컬에 머지(다른 교사의 활성 공유 인지용). */
+export async function mergeRemoteSharesFromSheet(
+  spreadsheetId?: string | null,
+): Promise<TeacherDb | null> {
+  const sid = spreadsheetId?.trim() || getActiveSpreadsheetId();
+  if (!sid) return null;
+  try {
+    const remote = await pullDbFromSheet(sid);
+    if (!remote) return null;
+    const local = loadTeacherDb();
+    const merged = mergeRemoteSharesIntoLocalDb(local, remote as TeacherDb);
+    saveTeacherDb(merged, { skipRemotePush: true });
+    return merged;
+  } catch (err) {
+    console.warn("[Writing app] mergeRemoteSharesFromSheet failed:", err);
+    return null;
+  }
 }
 
 export function createSubmissionId() {

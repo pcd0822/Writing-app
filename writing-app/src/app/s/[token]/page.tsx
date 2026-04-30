@@ -4,9 +4,42 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import styles from "./share.module.css";
 import { Button } from "@/components/ui/Button";
-import { findShare, isShareActive, loadTeacherDb, saveTeacherDb } from "@/lib/localDb";
+import {
+  findShare,
+  isShareActive,
+  loadTeacherDb,
+  mergeRemoteSharesIntoLocalDb,
+  saveTeacherDb,
+} from "@/lib/localDb";
 import type { TeacherDb } from "@/lib/types";
 import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+
+/**
+ * 교사가 방금 만든 공유 토큰이 시트에 반영되기 전에 학생이 접속하면 1회 pull로는
+ * 토큰을 못 찾을 수 있다. 짧은 백오프로 최대 3회까지 재시도하고, 시트 응답에
+ * 토큰이 들어 있으면 즉시 종료해서 사용자 경험은 빠르게 유지한다.
+ */
+async function pullSharedDbWithRetry(
+  spreadsheetId: string,
+  token: string,
+  isCancelled: () => boolean,
+): Promise<TeacherDb | null> {
+  const delays = [0, 800, 2000];
+  for (let i = 0; i < delays.length; i++) {
+    if (isCancelled()) return null;
+    if (delays[i]) await new Promise((r) => setTimeout(r, delays[i]));
+    if (isCancelled()) return null;
+    try {
+      const remote = (await pullDbFromSheet(spreadsheetId)) as TeacherDb | null;
+      if (!remote) continue;
+      const hasToken = remote.shares?.some((s) => s.token === token);
+      if (hasToken || i === delays.length - 1) return remote;
+    } catch (e) {
+      if (i === delays.length - 1) throw e;
+    }
+  }
+  return null;
+}
 
 type ShareState =
   | {
@@ -62,18 +95,25 @@ export default function ShareLandingPage() {
         return;
       }
 
-      // 2) 로컬에 없으면 URL의 sid로 원격 시트 동기화 후 재검증
+      // 2) 로컬에 없으면 URL의 sid로 원격 시트 동기화 후 재검증.
+      //    교사 푸시가 아직 끝나지 않았을 수 있어 짧은 백오프로 재시도한다.
       const sidFromUrl =
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search).get("sid")
           : null;
-      if (sidFromUrl) {
+      if (sidFromUrl && token) {
         try {
           setActiveSpreadsheetId(sidFromUrl);
-          const remote = await pullDbFromSheet(sidFromUrl);
+          const remote = await pullSharedDbWithRetry(sidFromUrl, token, () => cancelled);
           if (cancelled) return;
           if (remote) {
-            saveTeacherDb(remote as TeacherDb);
+            // 학생 디바이스에 다른 토큰의 진행 중 작업이 있다면 보존하기 위해
+            // 전체 덮어쓰기 대신 shares를 머지한 결과를 저장한다.
+            const merged = mergeRemoteSharesIntoLocalDb(loadTeacherDb(), remote);
+            saveTeacherDb(
+              { ...remote, shares: merged.shares },
+              { skipRemotePush: true },
+            );
             const after = validateFromLocal();
             if (cancelled) return;
             setShareState(after ?? { ok: false, reason: "notfound" });
@@ -130,9 +170,15 @@ export default function ShareLandingPage() {
       const effectiveSid = sidFromUrl || share.spreadsheetId || null;
       if (effectiveSid) {
         setActiveSpreadsheetId(effectiveSid);
-        const remote = await pullDbFromSheet(effectiveSid);
+        const remote = (await pullDbFromSheet(effectiveSid)) as TeacherDb | null;
         if (remote) {
-          saveTeacherDb(remote as TeacherDb);
+          // 학생 디바이스가 받은 원격 DB를 다시 푸시하지 않도록 skipRemotePush.
+          // shares는 머지하여 다른 토큰의 활성 정보를 잃지 않게 한다.
+          const merged = mergeRemoteSharesIntoLocalDb(loadTeacherDb(), remote);
+          saveTeacherDb(
+            { ...remote, shares: merged.shares },
+            { skipRemotePush: true },
+          );
         }
       }
 
