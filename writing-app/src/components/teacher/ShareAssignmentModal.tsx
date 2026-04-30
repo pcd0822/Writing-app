@@ -12,7 +12,7 @@ import {
   saveTeacherDb,
 } from "@/lib/localDb";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
-import { setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+import { pushDbToSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
 
 type Props = {
   isOpen: boolean;
@@ -82,7 +82,19 @@ export function ShareAssignmentModal({
         expiresAt: minutesFromNow(m),
         spreadsheetId: sid,
       });
-      saveTeacherDb(next);
+      // 시트가 연결되어 있으면 원격 반영이 끝난 뒤에 로컬 저장 + URL 노출을 한다.
+      // 그래야 교사가 곧바로 링크를 공유했을 때 학생 디바이스가 시트를 끌어와
+      // 토큰을 찾을 수 있다(레이스 방지).
+      if (sid) {
+        try {
+          await pushDbToSheet(sid, next);
+        } catch (e) {
+          console.error("[Writing app] share push failed:", e);
+          setError("시트 반영에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.");
+          return;
+        }
+      }
+      saveTeacherDb(next, { skipRemotePush: true });
       setLocalVer((v) => v + 1); // 모달 내 즉시 갱신
       onChanged();
     } catch {
