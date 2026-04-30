@@ -24,6 +24,7 @@ import {
   loadTeacherDb,
   markCommentRead,
   mergeStudentViewFromRemote,
+  replaceSubmissionFromRemote,
   resolveFeedbackNote,
   stageToStep,
   stepToStage,
@@ -49,6 +50,7 @@ import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/fina
 import {
   flushPendingPartialPush,
   flushPendingPush,
+  pullDbFromSheet,
   setActiveSpreadsheetId,
 } from "@/lib/spreadsheetSync";
 
@@ -138,6 +140,16 @@ export default function WritePage() {
   });
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  /**
+   * write 페이지 mount 시 시트와 자동 sync한 결과를 학생에게 알리는 모달.
+   * - "uploaded": local이 시트보다 fresh → 미동기 분량을 자동 회수해 시트로 push
+   * - "downloaded": 시트가 local보다 fresh → 다른 디바이스에서 작업한 본문을 가져와 적용
+   */
+  const [recoveryNotice, setRecoveryNotice] = useState<
+    null | { kind: "uploaded" | "downloaded" }
+  >(null);
+  /** mount-once 자동 sync는 submission.id별로 한 번씩만 실행되도록 추적 */
+  const initialSyncDoneRef = useRef<string | null>(null);
   const [feedbackPanelTab, setFeedbackPanelTab] = useState<FeedbackPanelTab>("outline");
   const [feedbackNoteModalId, setFeedbackNoteModalId] = useState<string | null>(null);
   const [tutorWidth, setTutorWidth] = useState(420);
@@ -316,6 +328,69 @@ export default function WritePage() {
   useEffect(() => {
     try { localStorage.setItem(TUTOR_H_KEY, String(tutorHeight)); } catch { /* ignore */ }
   }, [tutorHeight]);
+
+  /**
+   * mount 시점 자동 sync — 한 번만 실행.
+   *
+   * 학생 디바이스의 localStorage와 시트의 submission을 비교한 뒤:
+   *  - localStorage가 더 최근(updatedAt 큼) → 자동 partial push로 미동기 분량 회수.
+   *    quota·timeout 등으로 시트에 못 올라간 글이 학생이 접속만 해도 자동 동기화된다.
+   *  - 시트가 더 최근 → 시트 데이터로 localStorage를 갱신. 다른 디바이스에서 작업한
+   *    결과(예: 학교 노트북에서 쓴 글)가 집 PC에서도 그대로 보이도록 보장.
+   *  - 같으면 no-op.
+   *
+   * polling 흐름은 평상시 local 우선(작성 중 글 보호) 정책을 그대로 유지하고,
+   * 이 mount-once useEffect에서만 시트 우선 분기를 적용한다.
+   */
+  useEffect(() => {
+    if (!state.ok) return;
+    if (!studentAuth) return;
+    const submissionId = state.submission.id;
+    if (initialSyncDoneRef.current === submissionId) return;
+    initialSyncDoneRef.current = submissionId;
+
+    const localSubAtMount = state.submission;
+
+    void (async () => {
+      try {
+        const remote = (await pullDbFromSheet(studentAuth.spreadsheetId)) as
+          | TeacherDb
+          | null;
+        if (!remote) return;
+        const remoteSub = remote.submissions.find((s) => s.id === submissionId);
+        const localUpdated = localSubAtMount.updatedAt;
+        const remoteUpdated = remoteSub?.updatedAt ?? 0;
+
+        if (localUpdated > remoteUpdated) {
+          // 자동 회수: localStorage에 있지만 시트엔 안 올라간 분량을 partial push로 회수
+          const hasContent =
+            (localSubAtMount.outlineText ?? "").trim().length > 0 ||
+            (localSubAtMount.draftText ?? "").trim().length > 0 ||
+            (localSubAtMount.reviseText ?? "").trim().length > 0 ||
+            (localSubAtMount.graspData ?? "").trim().length > 0 ||
+            localSubAtMount.outlineSubmittedAt != null ||
+            localSubAtMount.draftSubmittedAt != null ||
+            localSubAtMount.reviseSubmittedAt != null;
+          if (!hasContent) return;
+          // graspData는 patch에 포함시켜야 시트의 옛 청크가 새 값으로 덮인다.
+          const patch: Partial<Submission> = {};
+          if (localSubAtMount.graspData) patch.graspData = localSubAtMount.graspData;
+          updateSubmissionAndPushPartial(submissionId, patch, studentAuth);
+          await flushPendingPartialPush(studentAuth.spreadsheetId, submissionId);
+          setRecoveryNotice({ kind: "uploaded" });
+          bumpDb();
+        } else if (remoteUpdated > localUpdated && remoteSub) {
+          // 시트 우선 적용: 다른 디바이스에서 작업한 결과를 받아옴.
+          // updatedAt도 시트 값을 그대로 보존(다음 mount 비교가 일관되도록).
+          replaceSubmissionFromRemote(remoteSub);
+          setRecoveryNotice({ kind: "downloaded" });
+          bumpDb();
+        }
+      } catch {
+        /* 자동 sync 실패는 silent — 학생이 명시 저장 시 다시 시도된다. */
+      }
+    })();
+  }, [state.ok ? state.submission.id : null, studentAuth]);
 
   /**
    * 교사 코멘트·승인 등을 학생 화면으로 가져오기 위한 polling.
@@ -840,6 +915,42 @@ export default function WritePage() {
         footer={<Button variant="secondary" onClick={() => setShowSaveSuccess(false)}>확인</Button>}>
         <div style={{ fontSize: 14, lineHeight: 1.55, color: "#0f172a" }}>
           저장이 완료되었습니다! 구글 스프레드시트에 연결된 경우 잠시 후 시트에도 반영됩니다.
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={recoveryNotice?.kind === "uploaded"}
+        onClose={() => setRecoveryNotice(null)}
+        title="이전 작업이 자동 저장되었습니다"
+        description="이 디바이스에 남아 있던 이전 작성 내용을 구글 스프레드시트에 자동으로 동기화했어요."
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setRecoveryNotice(null)}>
+            확인
+          </Button>
+        }
+      >
+        <div style={{ fontSize: 14, lineHeight: 1.6, color: "#0f172a" }}>
+          이전에 작성하신 내용이 구글 스프레드시트에 저장되지 않은 상태였는데,
+          접속과 동시에 자동으로 동기화되었습니다. 계속 작성하셔도 됩니다.
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={recoveryNotice?.kind === "downloaded"}
+        onClose={() => setRecoveryNotice(null)}
+        title="다른 디바이스의 작성 내용을 불러왔습니다"
+        description="다른 디바이스에서 마지막으로 작성·저장한 내용을 구글 스프레드시트에서 가져왔습니다."
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setRecoveryNotice(null)}>
+            확인
+          </Button>
+        }
+      >
+        <div style={{ fontSize: 14, lineHeight: 1.6, color: "#0f172a" }}>
+          다른 디바이스에서 작성·저장한 글이 화면에 표시됩니다.
+          이 디바이스에서 이어서 작성하시면 자동으로 동기화됩니다.
         </div>
       </Modal>
 

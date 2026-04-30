@@ -28,6 +28,55 @@ import {
 
 const KEY = "writing-app:teacherDb:v1";
 
+/**
+ * 같은 디바이스를 다른 학생이 사용하게 되는 케이스를 격리하기 위한 마커.
+ * share landing onEnter에서 인증 성공한 학생을 기록해두고, 다음에 다른 학생이
+ * 인증되면 localStorage(teacherDb)를 비워서 직전 학생의 작성물이 노출되지 않게 한다.
+ */
+const LAST_STUDENT_KEY = "writing-app:lastStudentAuth";
+
+/**
+ * 직전에 같은 디바이스로 인증한 학생과 동일한지 비교. 학번만 같고 코드가 다르면
+ * 다른 학생으로 간주(같은 학번이 여러 학급에 존재할 수 있고, 학생 코드는 유일).
+ */
+export function isSameStudentAsLast(studentNo: string, studentCode: string): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = window.localStorage.getItem(LAST_STUDENT_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { studentNo?: string; studentCode?: string };
+    return parsed.studentNo === studentNo && parsed.studentCode === studentCode;
+  } catch {
+    return false;
+  }
+}
+
+/** 인증 성공 시 마지막 학생을 기록. 다음 진입에서 비교 기준으로 사용. */
+export function rememberLastStudent(studentNo: string, studentCode: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      LAST_STUDENT_KEY,
+      JSON.stringify({ studentNo, studentCode }),
+    );
+  } catch {
+    /* sessionStorage·private mode 등에서는 격리 강도 낮아지지만 기능은 동작 */
+  }
+}
+
+/**
+ * 학생용 작성 데이터(teacherDb)만 비운다. 글꼴 너비·튜터 패널 위치 같은 UI 위젯
+ * 설정은 보존. 시트 pull로 이어지는 흐름에서 사용해야 학생 B가 빈 화면을 보지 않는다.
+ */
+export function clearStudentLocalDb() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 const defaultDb: TeacherDb = {
   version: 5,
   classes: [],
@@ -844,6 +893,30 @@ export function updateSubmissionAndPushStudent(
     { spreadsheetId: sid, studentPush: true },
   );
   return updated;
+}
+
+/**
+ * 시트의 submission 객체로 localStorage 항목을 통째 교체한다. 자동 sync에서 시트가
+ * 더 최신일 때(다른 디바이스에서 작업한 결과 반영) 사용. updateSubmissionLocalOnly와
+ * 달리 updatedAt을 Date.now()로 덮지 않고 시트 값을 그대로 보존하여 다음 mount 시
+ * 비교 결과가 일관되게 유지된다.
+ */
+export function replaceSubmissionFromRemote(
+  remoteSubmission: Submission,
+): Submission {
+  const db = loadTeacherDb();
+  const idx = db.submissions.findIndex((s) => s.id === remoteSubmission.id);
+  if (idx < 0) {
+    saveTeacherDb(
+      { ...db, submissions: [remoteSubmission, ...db.submissions] },
+      { skipRemotePush: true },
+    );
+    return remoteSubmission;
+  }
+  const next = [...db.submissions];
+  next[idx] = remoteSubmission;
+  saveTeacherDb({ ...db, submissions: next }, { skipRemotePush: true });
+  return remoteSubmission;
 }
 
 /**

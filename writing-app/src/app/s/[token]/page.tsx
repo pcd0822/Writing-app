@@ -5,10 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import styles from "./share.module.css";
 import { Button } from "@/components/ui/Button";
 import {
+  clearStudentLocalDb,
   findShare,
+  isSameStudentAsLast,
   isShareActive,
   loadTeacherDb,
   mergeRemoteSharesIntoLocalDb,
+  rememberLastStudent,
   saveTeacherDb,
 } from "@/lib/localDb";
 import type { ClassRoom, TeacherDb } from "@/lib/types";
@@ -150,52 +153,74 @@ export default function ShareLandingPage() {
     setIsVerifying(true);
     try {
       const sidFromUrl = new URLSearchParams(window.location.search).get("sid");
+      /**
+       * 같은 디바이스를 학생 A → 학생 B가 이어 사용하는 케이스에서 학생 A의 글이
+       * 학생 B에게 노출되지 않도록 격리한다.
+       *  - 같은 학생 재접속: 기존 동작(시트 머지, 미동기 분량 보존).
+       *  - 다른 학생 진입: localStorage 클리어 → 시트 데이터로만 채움. 시트 pull도
+       *    실패하면 격리를 보장할 수 없어 진입 자체를 차단한다.
+       */
+      const sameAsLast = isSameStudentAsLast(no, code);
 
-      const latestState = (() => {
+      // sid 확보: URL 파라미터 또는 (있을 때만) localStorage의 share. localStorage가
+      // 학생 A의 데이터라도 share 토큰은 같으므로 sid는 동일하다.
+      const localShareCandidate = (() => {
         try {
           const db = loadTeacherDb();
-          const share = token ? findShare(db, token) : null;
-          if (!share || !isShareActive(share)) return null;
-          const assignment = db.assignments.find((a) => a.id === share.assignmentId) || null;
-          const allocation =
-            db.allocations.find((x) => x.assignmentId === share.assignmentId) || null;
-          return { db, share, assignment, allocation };
+          return token ? findShare(db, token) : null;
         } catch {
           return null;
         }
       })();
+      const effectiveSid =
+        sidFromUrl || localShareCandidate?.spreadsheetId || null;
 
-      if (!latestState) {
-        setError("공유 링크가 유효하지 않습니다.");
+      // 시트 미연동 + 다른 학생 진입 = 격리 보장 불가. 안내 후 차단.
+      // 같은 학생이면 localStorage 기반 단일 디바이스 모드로 그대로 진행.
+      if (!sameAsLast && !effectiveSid) {
+        setError(
+          "다른 학생이 같은 디바이스를 사용하려면 교사가 구글 스프레드시트 연동을 활성화해야 합니다.",
+        );
         return;
       }
 
-      const { share } = latestState;
-      const effectiveSid = sidFromUrl || share.spreadsheetId || null;
+      // 시트 pull (retry). effectiveSid가 있을 때만.
       let pullFailed = false;
+      let remote: TeacherDb | null = null;
       if (effectiveSid) {
         setActiveSpreadsheetId(effectiveSid);
         try {
-          // 다수 동시 접속 시 1회 pull은 quota·timeout으로 실패할 수 있어 retry 사용.
-          // pull 실패 시 stale localStorage로 검증하면 일부 학생만 로그인 실패하는 증상이 발생.
           const result = await pullDbFromSheetWithRetry(effectiveSid, {
             attempts: 3,
             delayMs: 800,
           });
-          const remote = (result.db as TeacherDb | null) ?? null;
-          if (remote) {
-            const merged = mergeRemoteSharesIntoLocalDb(loadTeacherDb(), remote);
-            saveTeacherDb(
-              { ...remote, shares: merged.shares },
-              { skipRemotePush: true },
-            );
-          } else {
-            pullFailed = true;
-          }
+          remote = (result.db as TeacherDb | null) ?? null;
+          if (!remote) pullFailed = true;
         } catch {
           pullFailed = true;
         }
       }
+
+      if (!sameAsLast) {
+        // 다른 학생 진입. 시트 데이터 없이는 격리할 수 없으므로 차단.
+        if (pullFailed || !remote) {
+          setError(
+            "서버가 일시적으로 바쁘거나 네트워크가 불안정합니다. 잠시 후 다시 시도해주세요.",
+          );
+          return;
+        }
+        // 학생 A의 흔적을 모두 비우고 시트 데이터로만 채움(머지 없음).
+        clearStudentLocalDb();
+        saveTeacherDb({ ...remote }, { skipRemotePush: true });
+      } else if (remote) {
+        // 같은 학생 재접속 + 시트 연동. 기존 머지 정책 유지(자동 회수와 호환).
+        const merged = mergeRemoteSharesIntoLocalDb(loadTeacherDb(), remote);
+        saveTeacherDb(
+          { ...remote, shares: merged.shares },
+          { skipRemotePush: true },
+        );
+      }
+      // (같은 학생 + 시트 미연동: 별도 동작 없이 localStorage 그대로 사용)
 
       const latestState2 = (() => {
         try {
@@ -263,8 +288,12 @@ export default function ShareLandingPage() {
         return;
       }
 
+      // 인증 통과. 다음 진입 시 같은 학생인지 비교 기준으로 사용할 마지막 학생을 기록.
+      // 다른 학생이 같은 디바이스로 들어오면 위에서 localStorage가 클리어된다.
+      rememberLastStudent(no, code);
+
       // 다음 단계에서 실제 작문 화면(/write/...)로 이동하도록 연결
-      const sidForWrite = sidFromUrl || latestState2.share.spreadsheetId || "";
+      const sidForWrite = effectiveSid ?? "";
       const sidQ = sidForWrite ? `&sid=${encodeURIComponent(sidForWrite)}` : "";
       // partial update endpoint는 학생 코드를 인증 정보로 사용한다. URL에 노출되면 공유 링크
       // 자체가 코드까지 포함해 유출 위험이 있으므로 sessionStorage(같은 탭에만 유효)에 보관.
