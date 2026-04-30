@@ -14,7 +14,7 @@ import {
 } from "@/lib/localDb";
 import {
   flushPendingPush,
-  pullDbFromSheet,
+  pullDbFromSheetWithRetry,
   pushDbToSheet,
   setActiveSpreadsheetId,
 } from "@/lib/spreadsheetSync";
@@ -48,7 +48,13 @@ export default function TeacherPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<{ kind: "ok" | "empty" | "err"; msg: string } | null>(null);
+  const [syncStage, setSyncStage] = useState<
+    null | "flushing" | "pulling" | "retrying" | "merging" | "pushing"
+  >(null);
+  const [syncStatus, setSyncStatus] = useState<{
+    kind: "ok" | "empty" | "warn" | "err";
+    msg: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) router.replace("/");
@@ -130,11 +136,14 @@ export default function TeacherPage() {
   }
 
   /**
-   * 시트에서 원격 DB를 가져와 로컬과 양방향으로 머지하고, 머지된 결과를 시트에
-   * 다시 push해 모든 디바이스가 같은 상태에 수렴하도록 한다.
-   *  - 단순 덮어쓰기는 로컬에만 있는 미푸시 변경(방금 만든 과제 등)을 잃게 한다.
-   *  - 진행 중인 코얼레싱 push가 있으면 먼저 끝낸 뒤 pull → 우리 baseline에
-   *    내가 방금 만든 변경이 빠지지 않게 한다.
+   * 시트에서 원격 DB를 가져와 로컬과 양방향 머지 후 시트에 다시 push.
+   *
+   * 핵심 안전장치:
+   *  - pull은 retry로 시트 propagation lag(다른 교사가 막 push한 직후 일시적
+   *    빈 결과)를 흡수한다.
+   *  - "빈 시트"로 확정돼도 로컬을 자동으로 시트에 덮어쓰지 않는다. 다른 교사의
+   *    데이터가 lag로 빈 결과로 보일 때 우리 로컬을 자동 업로드하면 그 데이터를
+   *    덮어쓰는 데이터 손실이 발생하기 때문. 빈 결과 시에는 사용자에게 안내.
    */
   async function syncFromSheet(silent = false) {
     if (typeof window === "undefined") return;
@@ -147,56 +156,80 @@ export default function TeacherPage() {
     setSyncStatus(null);
     try {
       setActiveSpreadsheetId(sid);
-      // 진행 중인 변경을 먼저 시트에 반영해야 다른 디바이스가 가져갈 수 있다.
+
+      // 1) 진행 중인 변경을 먼저 시트에 반영해야 다른 디바이스가 가져갈 수 있다.
+      setSyncStage("flushing");
       await flushPendingPush(sid);
-      const remote = await pullDbFromSheet(sid);
-      if (remote) {
-        const remoteDb = remote as TeacherDb;
+
+      // 2) 시트에서 최신 상태 pull (시트 lag 대응 retry).
+      setSyncStage("pulling");
+      const result = await pullDbFromSheetWithRetry(sid, {
+        attempts: 3,
+        delayMs: 900,
+        onAttempt: (n, total) => {
+          if (n > 1) setSyncStage("retrying");
+          // retry 시점 표시는 onAttempt로 갱신. 첫 시도는 "pulling" 유지.
+          void total;
+        },
+      });
+
+      if (result.db) {
+        // 3) 로컬과 머지 → 로컬 갱신 → 시트 재반영(양방향 수렴).
+        setSyncStage("merging");
+        const remoteDb = result.db as TeacherDb;
         const local = loadTeacherDb();
         const merged = mergeTeacherDbs(local, remoteDb);
-        // 머지 결과를 로컬에 반영하고 시트에도 push해 양쪽이 같은 상태로 수렴.
         saveTeacherDb(merged, { skipRemotePush: true });
+
+        setSyncStage("pushing");
         try {
           await pushDbToSheet(sid, merged, { skipPullMerge: true });
         } catch (e) {
           console.warn("[Writing app] sync post-push failed:", e);
         }
+
         const totalStudents = (merged.classes || []).reduce(
           (sum, c) => sum + (c.students?.length || 0),
           0,
         );
+        const activeShares = (merged.shares || []).filter(
+          (s) => !s.revokedAt && Date.now() < s.expiresAt,
+        ).length;
         setSyncStatus({
           kind: "ok",
-          msg: `시트와 양방향 동기화 완료 — 학급 ${merged.classes?.length || 0}개 · 학생 ${totalStudents}명 · 과제 ${merged.assignments?.length || 0}개`,
+          msg:
+            `시트와 양방향 동기화 완료 — 학급 ${merged.classes?.length || 0}개 · ` +
+            `학생 ${totalStudents}명 · 과제 ${merged.assignments?.length || 0}개 · ` +
+            `활성 공유링크 ${activeShares}개`,
         });
         refreshDb();
       } else {
-        // 시트가 비어 있으면 로컬을 시트로 일괄 업로드(첫 사용자 시나리오).
+        // 빈 시트로 확정. 로컬 데이터가 있어도 자동 업로드는 하지 않음
+        // (다른 교사의 데이터를 lag 인식으로 덮어쓰는 위험 방지).
         const local = loadTeacherDb();
         const hasLocalData =
           (local.classes?.length || 0) > 0 ||
           (local.assignments?.length || 0) > 0 ||
           (local.submissions?.length || 0) > 0;
         if (hasLocalData) {
-          try {
-            await pushDbToSheet(sid, local, { skipPullMerge: true });
-            setSyncStatus({
-              kind: "ok",
-              msg: "시트가 비어 있어 로컬 데이터를 시트로 업로드했습니다.",
-            });
-          } catch (e) {
-            setSyncStatus({ kind: "err", msg: (e as Error).message || "업로드 실패" });
-          }
+          setSyncStatus({
+            kind: "warn",
+            msg:
+              "시트에서 데이터를 가져오지 못했습니다(여러 번 재시도). 다른 교사가 방금 push한 직후라면 잠시 후 다시 동기화해주세요. " +
+              "데이터 손실 방지를 위해 자동으로 시트에 덮어쓰지 않습니다. 시트 ID·접근 권한·서비스 계정 공유 상태도 확인해주세요.",
+          });
         } else {
           setSyncStatus({
             kind: "empty",
-            msg: "시트에 저장된 데이터가 없습니다. (다른 디바이스에서 한 번도 저장되지 않았거나 시트 ID가 다를 수 있습니다)",
+            msg:
+              "시트에 저장된 데이터가 없습니다. (다른 디바이스에서 한 번도 저장되지 않았거나 시트 ID가 다를 수 있습니다)",
           });
         }
       }
     } catch (e) {
       setSyncStatus({ kind: "err", msg: (e as Error).message || "동기화 실패" });
     } finally {
+      setSyncStage(null);
       setIsSyncing(false);
     }
   }
@@ -260,8 +293,12 @@ export default function TeacherPage() {
       if (sid) {
         try {
           await flushPendingPush(sid);
-          const remote = await pullDbFromSheet(sid);
-          if (remote) base = mergeTeacherDbs(base, remote as TeacherDb);
+          // lag로 빈 결과를 받아 다른 교사 데이터를 잃지 않도록 retry.
+          const result = await pullDbFromSheetWithRetry(sid, {
+            attempts: 2,
+            delayMs: 700,
+          });
+          if (result.db) base = mergeTeacherDbs(base, result.db as TeacherDb);
         } catch (e) {
           console.warn("[Writing app] delete pre-pull failed:", e);
         }
@@ -303,8 +340,64 @@ export default function TeacherPage() {
 
   if (!user) return null;
 
+  const syncStageLabel = (() => {
+    switch (syncStage) {
+      case "flushing":
+        return "진행 중인 변경을 시트에 반영하는 중…";
+      case "pulling":
+        return "시트에서 최신 데이터를 가져오는 중…";
+      case "retrying":
+        return "시트가 응답 지연 중입니다. 잠시 후 다시 시도하는 중…";
+      case "merging":
+        return "다른 디바이스의 변경과 병합하는 중…";
+      case "pushing":
+        return "병합 결과를 시트에 반영하는 중…";
+      default:
+        return "준비 중…";
+    }
+  })();
+
+  // 진행 단계 도트(시각화). 각 단계가 완료되면 done, 현재 단계는 active.
+  const stageOrder = ["flushing", "pulling", "merging", "pushing"] as const;
+  const stageStatus = (s: (typeof stageOrder)[number]): "done" | "active" | "pending" => {
+    const idx = stageOrder.indexOf(s);
+    const cur = syncStage === "retrying" ? "pulling" : syncStage;
+    const curIdx = stageOrder.indexOf(cur as (typeof stageOrder)[number]);
+    if (curIdx < 0) return "pending";
+    if (idx < curIdx) return "done";
+    if (idx === curIdx) return "active";
+    return "pending";
+  };
+
   return (
     <div className={styles.page}>
+      {isSyncing && syncStage ? (
+        <div
+          className={styles.syncOverlay}
+          role="status"
+          aria-live="polite"
+          aria-label="동기화 진행 중"
+        >
+          <div className={styles.syncCard}>
+            <div className={styles.syncSpinner} />
+            <div className={styles.syncTitle}>동기화 진행 중</div>
+            <div className={styles.syncStageMsg}>{syncStageLabel}</div>
+            <div className={styles.syncSteps} aria-hidden="true">
+              {stageOrder.map((s) => {
+                const st = stageStatus(s);
+                const cls =
+                  st === "done"
+                    ? `${styles.syncDot} ${styles.syncDotDone}`
+                    : st === "active"
+                      ? `${styles.syncDot} ${styles.syncDotActive}`
+                      : styles.syncDot;
+                return <span key={s} className={cls} />;
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className={styles.container}>
         <div className={styles.topbar}>
           <div>

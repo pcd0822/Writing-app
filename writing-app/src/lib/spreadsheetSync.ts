@@ -39,6 +39,35 @@ export async function pullDbFromSheetWithDiag(spreadsheetId: string): Promise<Pu
   return await callFunction<PullResult>("db-get", { spreadsheetId });
 }
 
+/**
+ * 시트가 막 push된 직후 또는 다른 디바이스의 push가 propagate되는 동안 batchGet
+ * 응답이 일시적으로 빈 결과(meta+tabular 모두 비어있음)를 반환할 수 있다. 이를
+ * "시트가 비어있다"고 단정하지 않도록 짧은 백오프로 재시도한다. 빈 결과 한 번을
+ * 신호로 자동 업로드 같은 데이터 손실 path로 가지 않게 막는 것이 핵심.
+ *
+ * 여러 번 시도해도 빈 결과면 정말 빈 시트로 확정. 그때는 호출자가 사용자 확인
+ * 없이는 시트를 덮어쓰지 않도록 처리한다.
+ */
+export async function pullDbFromSheetWithRetry(
+  spreadsheetId: string,
+  options?: {
+    attempts?: number;
+    delayMs?: number;
+    onAttempt?: (attempt: number, total: number) => void;
+  },
+): Promise<PullResult> {
+  const attempts = options?.attempts ?? 3;
+  const delayMs = options?.delayMs ?? 900;
+  let last: PullResult = { db: null };
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delayMs * i));
+    options?.onAttempt?.(i + 1, attempts);
+    last = await callFunction<PullResult>("db-get", { spreadsheetId });
+    if (last.db) return last;
+  }
+  return last;
+}
+
 export async function pushDbToSheet(
   spreadsheetId: string,
   db: unknown,
@@ -57,7 +86,12 @@ export async function pushDbToSheet(
   let toPush = db as TeacherDb;
   if (!options?.skipPullMerge) {
     try {
-      const remote = await callFunction<PullResult>("db-get", { spreadsheetId });
+      // pre-push pull도 재시도. 직전에 다른 교사가 push한 데이터가 lag로 빈
+      // 결과로 보이면 우리가 그것을 union하지 못해 시트에서 사라뜨릴 수 있음.
+      const remote = await pullDbFromSheetWithRetry(spreadsheetId, {
+        attempts: 2,
+        delayMs: 600,
+      });
       if (remote.db) {
         const { mergeTeacherDbs } = await import("./localDb");
         toPush = mergeTeacherDbs(toPush, remote.db as TeacherDb);

@@ -19,6 +19,7 @@ import { normalizeDriveAttachmentsInDb } from "./attachments";
 import {
   getActiveSpreadsheetId,
   pullDbFromSheet,
+  pullDbFromSheetWithRetry,
   pushDbToSheetCoalesced,
   setActiveSpreadsheetId,
 } from "./spreadsheetSync";
@@ -497,10 +498,14 @@ export async function mergeRemoteSharesFromSheet(
   const sid = spreadsheetId?.trim() || getActiveSpreadsheetId();
   if (!sid) return null;
   try {
-    const remote = await pullDbFromSheet(sid);
-    if (!remote) return null;
+    // 시트 lag로 share가 일시적으로 빈 결과로 보이는 경우를 막기 위해 retry.
+    const result = await pullDbFromSheetWithRetry(sid, {
+      attempts: 3,
+      delayMs: 800,
+    });
+    if (!result.db) return null;
     const local = loadTeacherDb();
-    const merged = mergeRemoteSharesIntoLocalDb(local, remote as TeacherDb);
+    const merged = mergeRemoteSharesIntoLocalDb(local, result.db as TeacherDb);
     saveTeacherDb(merged, { skipRemotePush: true });
     return merged;
   } catch (err) {

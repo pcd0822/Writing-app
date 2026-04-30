@@ -1,4 +1,4 @@
-import { getSheetsClient } from "./_sheets";
+import { getSheetsClient, getSheetIdMap } from "./_sheets";
 import {
   buildChunkSheetValues,
   buildSlimDbFromTabular,
@@ -13,37 +13,13 @@ import {
 import type { TeacherDb } from "../../src/lib/types";
 import { TeacherDbSchema } from "../../src/lib/types";
 
-const CLEAR_SUFFIX = "!A1:Z50000";
-
 /**
  * Google Sheets 호출이 무한 대기하지 않도록 transport-level timeout. Netlify
  * 무료 플랜의 함수 timeout은 10초이므로 그보다 짧게 설정해서, 시트가 느릴 때
  * lambda 자체가 죽어 502가 나는 대신 우리 핸들러가 catch해 500을 반환하게 한다.
  */
-const SHEETS_RPC_TIMEOUT_MS = 8500;
+const SHEETS_RPC_TIMEOUT_MS = 9000;
 const SHEETS_RPC_OPTS = { timeout: SHEETS_RPC_TIMEOUT_MS } as const;
-
-/** v2 저장 시 한 번에 비울 범위(이전 행 잔여 제거) */
-export function clearDataRanges(): string[] {
-  return [
-    `meta${CLEAR_SUFFIX}`,
-    `assignment_text${CLEAR_SUFFIX}`,
-    `submission_text${CLEAR_SUFFIX}`,
-    `feedback_text${CLEAR_SUFFIX}`,
-    `ai_log_text${CLEAR_SUFFIX}`,
-    `score_text${CLEAR_SUFFIX}`,
-    `extra_text${CLEAR_SUFFIX}`,
-    `classes${CLEAR_SUFFIX}`,
-    `students${CLEAR_SUFFIX}`,
-    `assignments${CLEAR_SUFFIX}`,
-    `assignment_targets${CLEAR_SUFFIX}`,
-    `shares${CLEAR_SUFFIX}`,
-    `submissions${CLEAR_SUFFIX}`,
-    `feedback_notes${CLEAR_SUFFIX}`,
-    `ai_logs${CLEAR_SUFFIX}`,
-    `scores${CLEAR_SUFFIX}`,
-  ];
-}
 
 function tryParseMeta(
   metaCell: string | undefined,
@@ -177,6 +153,43 @@ export async function readTeacherDbFromSpreadsheet(
   return recovered;
 }
 
+/**
+ * 한 시트의 (clear + write)를 한 쌍의 updateCells request로 변환.
+ *  - 첫 request: 시트 전체 영역의 userEnteredValue를 비움(rows 미지정 → 빈 셀로 설정)
+ *  - 두 번째 request: 새 데이터 작성
+ *
+ * 같은 spreadsheets.batchUpdate 안에 들어가므로 atomic — 부분 실패가 발생할 수 없다.
+ * (이전엔 batchClear 후 별도 batchUpdate를 await했고, 둘 사이에서 lambda timeout이
+ * 발생하면 시트가 비워진 채로 새 데이터가 안 들어가 데이터 손실이 났다.)
+ */
+function buildSheetWriteRequests(
+  sheetId: number,
+  values: string[][],
+): unknown[] {
+  const reqs: unknown[] = [
+    {
+      updateCells: {
+        range: { sheetId, startRowIndex: 0, startColumnIndex: 0 },
+        fields: "userEnteredValue",
+      },
+    },
+  ];
+  if (values.length > 0 && values[0]!.length > 0) {
+    reqs.push({
+      updateCells: {
+        start: { sheetId, rowIndex: 0, columnIndex: 0 },
+        rows: values.map((row) => ({
+          values: row.map((cell) => ({
+            userEnteredValue: { stringValue: String(cell ?? "") },
+          })),
+        })),
+        fields: "userEnteredValue",
+      },
+    });
+  }
+  return reqs;
+}
+
 export async function writeTeacherDbToSpreadsheet(
   spreadsheetId: string,
   db: TeacherDb,
@@ -196,40 +209,48 @@ export async function writeTeacherDbToSpreadsheet(
   const chunks = buildChunkSheetValues(validated);
   const tab = buildTabularSheetValues(validated);
 
-  await sheets.spreadsheets.values.batchClear(
-    {
-      spreadsheetId,
-      requestBody: { ranges: clearDataRanges() },
-    },
-    SHEETS_RPC_OPTS,
-  );
+  const idMap = await getSheetIdMap(spreadsheetId);
 
-  const data: { range: string; values: string[][] }[] = [
-    { range: "meta!A1", values: [[metaStr]] },
-    { range: "assignment_text!A1", values: chunks.assignment_text },
-    { range: "submission_text!A1", values: chunks.submission_text },
-    { range: "feedback_text!A1", values: chunks.feedback_text },
-    { range: "ai_log_text!A1", values: chunks.ai_log_text },
-    { range: "score_text!A1", values: chunks.score_text },
-    { range: "extra_text!A1", values: chunks.extra_text },
-    { range: "classes!A1", values: tab.classes },
-    { range: "students!A1", values: tab.students },
-    { range: "assignments!A1", values: tab.assignments },
-    { range: "assignment_targets!A1", values: tab.assignment_targets },
-    { range: "shares!A1", values: tab.shares },
-    { range: "submissions!A1", values: tab.submissions },
-    { range: "feedback_notes!A1", values: tab.feedback_notes },
-    { range: "ai_logs!A1", values: tab.ai_logs },
-    { range: "scores!A1", values: tab.scores },
+  const sheetData: { title: string; values: string[][] }[] = [
+    { title: "meta", values: [[metaStr]] },
+    { title: "assignment_text", values: chunks.assignment_text },
+    { title: "submission_text", values: chunks.submission_text },
+    { title: "feedback_text", values: chunks.feedback_text },
+    { title: "ai_log_text", values: chunks.ai_log_text },
+    { title: "score_text", values: chunks.score_text },
+    { title: "extra_text", values: chunks.extra_text },
+    { title: "classes", values: tab.classes },
+    { title: "students", values: tab.students },
+    { title: "assignments", values: tab.assignments },
+    { title: "assignment_targets", values: tab.assignment_targets },
+    { title: "shares", values: tab.shares },
+    { title: "submissions", values: tab.submissions },
+    { title: "feedback_notes", values: tab.feedback_notes },
+    { title: "ai_logs", values: tab.ai_logs },
+    { title: "scores", values: tab.scores },
   ];
 
-  await sheets.spreadsheets.values.batchUpdate(
+  const requests: unknown[] = [];
+  const missing: string[] = [];
+  for (const { title, values } of sheetData) {
+    const id = idMap.get(title);
+    if (id == null) {
+      missing.push(title);
+      continue;
+    }
+    requests.push(...buildSheetWriteRequests(id, values));
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `시트 ID 매핑 누락: ${missing.join(", ")}. 잠시 후 다시 시도하면 자동 복구됩니다.`,
+    );
+  }
+
+  await sheets.spreadsheets.batchUpdate(
     {
       spreadsheetId,
-      requestBody: {
-        valueInputOption: "RAW",
-        data,
-      },
+      requestBody: { requests: requests as never },
     },
     SHEETS_RPC_OPTS,
   );

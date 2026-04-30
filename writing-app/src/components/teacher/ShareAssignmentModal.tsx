@@ -16,7 +16,7 @@ import {
 import { loadTeacherSettings } from "@/lib/teacherSettings";
 import {
   flushPendingPush,
-  pullDbFromSheet,
+  pullDbFromSheetWithRetry,
   pushDbToSheet,
   setActiveSpreadsheetId,
 } from "@/lib/spreadsheetSync";
@@ -128,9 +128,12 @@ export function ShareAssignmentModal({
       if (sid) {
         try {
           await flushPendingPush(sid);
-          const remote = (await pullDbFromSheet(sid)) as TeacherDb | null;
-          if (remote) {
-            baseDb = mergeRemoteSharesIntoLocalDb(baseDb, remote);
+          const result = await pullDbFromSheetWithRetry(sid, {
+            attempts: 2,
+            delayMs: 700,
+          });
+          if (result.db) {
+            baseDb = mergeRemoteSharesIntoLocalDb(baseDb, result.db as TeacherDb);
           }
         } catch (e) {
           console.warn("[Writing app] share-create pre-pull failed:", e);
@@ -195,8 +198,12 @@ export function ShareAssignmentModal({
       if (sid) {
         try {
           await flushPendingPush(sid);
-          const remote = (await pullDbFromSheet(sid)) as TeacherDb | null;
-          if (remote) baseDb = mergeRemoteSharesIntoLocalDb(baseDb, remote);
+          const result = await pullDbFromSheetWithRetry(sid, {
+            attempts: 2,
+            delayMs: 700,
+          });
+          if (result.db)
+            baseDb = mergeRemoteSharesIntoLocalDb(baseDb, result.db as TeacherDb);
         } catch (e) {
           console.warn("[Writing app] revoke pre-pull failed:", e);
         }

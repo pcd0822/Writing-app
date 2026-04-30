@@ -469,3 +469,82 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── 동기화 진행 오버레이 ─────────────────────────────────── */
+.syncOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: syncFadeIn 0.15s ease;
+}
+
+@keyframes syncFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.syncCard {
+  background: white;
+  border-radius: 16px;
+  padding: 28px 32px;
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.syncSpinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: syncSpin 0.9s linear infinite;
+}
+
+@keyframes syncSpin {
+  to { transform: rotate(360deg); }
+}
+
+.syncTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.syncStageMsg {
+  font-size: 14px;
+  color: #475569;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.syncSteps {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.syncDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  transition: background 0.2s ease;
+}
+
+.syncDotActive {
+  background: #2563eb;
+}
+
+.syncDotDone {
+  background: #16a34a;
+}
