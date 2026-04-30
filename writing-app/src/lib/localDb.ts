@@ -14,6 +14,7 @@ import {
   type StepTransition,
   type TeacherComment,
   type TeacherDb,
+  type Tombstone,
 } from "./types";
 import { normalizeDriveAttachmentsInDb } from "./attachments";
 import {
@@ -39,6 +40,7 @@ const defaultDb: TeacherDb = {
   stepTransitions: [],
   aiInteractions: [],
   teacherComments: [],
+  tombstones: [],
 };
 
 function assertBrowser() {
@@ -103,6 +105,7 @@ function migrateToV5(parsed: Record<string, unknown>): TeacherDb {
     stepTransitions: (parsed.stepTransitions as TeacherDb["stepTransitions"]) || [],
     aiInteractions: (parsed.aiInteractions as TeacherDb["aiInteractions"]) || [],
     teacherComments: (parsed.teacherComments as TeacherDb["teacherComments"]) || [],
+    tombstones: (parsed.tombstones as TeacherDb["tombstones"]) || [],
   };
 }
 
@@ -217,6 +220,7 @@ export function deleteClass(db: TeacherDb, classId: string): TeacherDb {
     ...a,
     targets: a.targets.filter((t) => t.classId !== classId),
   }));
+  const tombstone: Tombstone = { kind: "class", id: classId, deletedAt: Date.now() };
   return {
     ...db,
     classes: db.classes.filter((c) => c.id !== classId),
@@ -228,6 +232,7 @@ export function deleteClass(db: TeacherDb, classId: string): TeacherDb {
     stepTransitions: db.stepTransitions.filter((t) => !removedSubmissionIds.has(t.submissionId)),
     aiInteractions: db.aiInteractions.filter((i) => !removedSubmissionIds.has(i.submissionId)),
     teacherComments: db.teacherComments.filter((c) => !removedSubmissionIds.has(c.submissionId)),
+    tombstones: addTombstone(db.tombstones, tombstone),
   };
 }
 
@@ -243,6 +248,11 @@ export function deleteAssignment(db: TeacherDb, assignmentId: string): TeacherDb
   const removedSubmissionIds = new Set(
     db.submissions.filter((s) => s.assignmentId === assignmentId).map((s) => s.id),
   );
+  const tombstone: Tombstone = {
+    kind: "assignment",
+    id: assignmentId,
+    deletedAt: Date.now(),
+  };
   return {
     ...db,
     assignments: db.assignments.filter((a) => a.id !== assignmentId),
@@ -255,6 +265,7 @@ export function deleteAssignment(db: TeacherDb, assignmentId: string): TeacherDb
     stepTransitions: db.stepTransitions.filter((t) => !removedSubmissionIds.has(t.submissionId)),
     aiInteractions: db.aiInteractions.filter((i) => !removedSubmissionIds.has(i.submissionId)),
     teacherComments: db.teacherComments.filter((c) => !removedSubmissionIds.has(c.submissionId)),
+    tombstones: addTombstone(db.tombstones, tombstone),
   };
 }
 
@@ -458,8 +469,99 @@ function mergeAllocations(
   return Array.from(map.values());
 }
 
-export function mergeTeacherDbs(local: TeacherDb, remote: TeacherDb): TeacherDb {
+// ── Tombstone helpers ─────────────────────────────────────────
+
+/** 동일 (kind,id) 마커가 있으면 더 이른 deletedAt 보존, 없으면 추가. */
+function addTombstone(existing: Tombstone[] | undefined, t: Tombstone): Tombstone[] {
+  const arr = existing ?? [];
+  const idx = arr.findIndex((x) => x.kind === t.kind && x.id === t.id);
+  if (idx < 0) return [...arr, t];
+  const cur = arr[idx]!;
+  if (cur.deletedAt <= t.deletedAt) return arr;
+  const next = [...arr];
+  next[idx] = t;
+  return next;
+}
+
+function mergeTombstones(a: Tombstone[], b: Tombstone[]): Tombstone[] {
+  const map = new Map<string, Tombstone>();
+  for (const t of a) map.set(`${t.kind}:${t.id}`, t);
+  for (const t of b) {
+    const key = `${t.kind}:${t.id}`;
+    const cur = map.get(key);
+    if (!cur || t.deletedAt < cur.deletedAt) map.set(key, t);
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * tombstones에 마킹된 엔티티(class·assignment)를 결과 db에서 cascade로 제거.
+ * union 머지 직후 호출해서 다른 디바이스의 stale 데이터로 부활하지 않도록 한다.
+ */
+function applyTombstones(db: TeacherDb): TeacherDb {
+  const tombs = db.tombstones || [];
+  const classDeleted = new Set(
+    tombs.filter((t) => t.kind === "class").map((t) => t.id),
+  );
+  const assignmentDeleted = new Set(
+    tombs.filter((t) => t.kind === "assignment").map((t) => t.id),
+  );
+  if (classDeleted.size === 0 && assignmentDeleted.size === 0) return db;
+
+  const classes = db.classes.filter((c) => !classDeleted.has(c.id));
+  const assignments = db.assignments.filter((a) => !assignmentDeleted.has(a.id));
+  const allocations = db.allocations
+    .filter((a) => !assignmentDeleted.has(a.assignmentId))
+    .map((a) => ({
+      ...a,
+      targets: a.targets.filter((t) => !classDeleted.has(t.classId)),
+    }));
+  const shares = db.shares.filter((s) => !assignmentDeleted.has(s.assignmentId));
+  const removedSubmissionIds = new Set(
+    db.submissions
+      .filter(
+        (s) =>
+          assignmentDeleted.has(s.assignmentId) || classDeleted.has(s.classId),
+      )
+      .map((s) => s.id),
+  );
+  const submissions = db.submissions.filter(
+    (s) =>
+      !assignmentDeleted.has(s.assignmentId) && !classDeleted.has(s.classId),
+  );
+  const feedbackNotes = db.feedbackNotes.filter(
+    (n) => !removedSubmissionIds.has(n.submissionId),
+  );
+  const aiLogs = db.aiLogs.filter((l) => !removedSubmissionIds.has(l.submissionId));
+  const scores = db.scores.filter((s) => !removedSubmissionIds.has(s.submissionId));
+  const stepTransitions = db.stepTransitions.filter(
+    (t) => !removedSubmissionIds.has(t.submissionId),
+  );
+  const aiInteractions = db.aiInteractions.filter(
+    (i) => !removedSubmissionIds.has(i.submissionId),
+  );
+  const teacherComments = db.teacherComments.filter(
+    (c) => !removedSubmissionIds.has(c.submissionId),
+  );
+
   return {
+    ...db,
+    classes,
+    assignments,
+    allocations,
+    shares,
+    submissions,
+    feedbackNotes,
+    aiLogs,
+    scores,
+    stepTransitions,
+    aiInteractions,
+    teacherComments,
+  };
+}
+
+export function mergeTeacherDbs(local: TeacherDb, remote: TeacherDb): TeacherDb {
+  const merged: TeacherDb = {
     version: local.version,
     classes: mergeClasses(local.classes, remote.classes),
     // 과제는 updatedAt이 없어 비교 불가 → local 우선(사용자의 최근 입력 보존).
@@ -488,7 +590,10 @@ export function mergeTeacherDbs(local: TeacherDb, remote: TeacherDb): TeacherDb 
       if (r.readAt != null && l.readAt == null) return r;
       return l;
     }),
+    tombstones: mergeTombstones(local.tombstones || [], remote.tombstones || []),
   };
+  // tombstone에 매칭되는 엔티티를 cascade로 제거 → 부활 방지.
+  return applyTombstones(merged);
 }
 
 /** 시트에서 최신 shares만 가져와 로컬에 머지(다른 교사의 활성 공유 인지용). */

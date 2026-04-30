@@ -518,6 +518,10 @@ export function buildSlimDbFromTabular(tab: {
     stepTransitions: [],
     aiInteractions: [],
     teacherComments: [],
+    // tombstones는 meta JSON에만 저장됨. tabular fallback 경로에선 빈 배열로
+    // 시작하지만, 동일 시트의 다른 디바이스가 다음 push에서 tombstones를 다시
+    // 정착시키므로 일시적 누락은 머지로 자가 치유된다.
+    tombstones: [],
   };
 }
 

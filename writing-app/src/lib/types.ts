@@ -205,6 +205,22 @@ export const ScoreSchema = z.object({
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
+// ── Tombstone (삭제 마커) ──────────────────────────────────────
+//
+// union 머지 모델에서 한쪽 디바이스의 삭제가 다른 디바이스의 stale 로컬에 의해
+// 부활하지 않도록, 삭제 시점에 tombstone을 남겨 다음 머지에서 해당 id를 결과
+// 집합에서 제거한다. tombstone 자체는 union 머지로 모든 디바이스에 전파된다.
+export const TombstoneKindSchema = z.enum(["class", "assignment"]);
+export type TombstoneKind = z.infer<typeof TombstoneKindSchema>;
+
+export const TombstoneSchema = z.object({
+  kind: TombstoneKindSchema,
+  /** 삭제된 엔티티의 id (class.id, assignment.id) */
+  id: z.string().min(1),
+  deletedAt: z.number().int(),
+});
+export type Tombstone = z.infer<typeof TombstoneSchema>;
+
 export const TeacherDbSchema = z.object({
   version: z.literal(5),
   /** 구글 시트 v2 분산 저장 시 메타에만 사용 (클라이언트 로직에서는 무시 가능) */
@@ -220,6 +236,8 @@ export const TeacherDbSchema = z.object({
   stepTransitions: z.array(StepTransitionSchema).default([]),
   aiInteractions: z.array(AiInteractionSchema).default([]),
   teacherComments: z.array(TeacherCommentSchema).default([]),
+  /** 삭제 마커. v5 DB에는 없을 수 있으므로 default([]) */
+  tombstones: z.array(TombstoneSchema).default([]),
 });
 export type TeacherDb = z.infer<typeof TeacherDbSchema>;
 
