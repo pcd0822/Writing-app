@@ -144,6 +144,80 @@ export const handler: Handler = async (event) => {
           "시트 접근 실패 — 서비스 계정 이메일에 시트가 공유되지 않았거나 ID가 잘못됨.",
       });
     }
+
+    // Step 5: meta!A1 + assignments 행 수 + tombstones 직접 노출.
+    //         두 디바이스에서 같은 시트를 봤을 때 결과가 다르면 여기서 사실 관계
+    //         (시트의 진짜 assignment·tombstone)를 객관적으로 확인 가능.
+    const sheetStateRes = await timeStep("read sheet state", async () => {
+      const { getSheetsClient } = await import("./_sheets");
+      const sheets = getSheetsClient();
+      const res = await sheets.spreadsheets.values.batchGet(
+        {
+          spreadsheetId,
+          ranges: ["meta!A1", "assignments!A:C"],
+        },
+        { timeout: 8000 },
+      );
+      const valueRanges = res.data.valueRanges || [];
+      const metaCell = (valueRanges[0]?.values?.[0]?.[0] as string | undefined) ?? "";
+      const assignmentRows = (valueRanges[1]?.values || []) as string[][];
+
+      let metaSummary: {
+        parsed: boolean;
+        sheetDbVersion?: number;
+        assignmentsCount: number;
+        assignmentsSample: { id: string; title: string }[];
+        tombstonesCount: number;
+        tombstonesAll: { kind: string; id: string; deletedAt: number }[];
+      } = {
+        parsed: false,
+        assignmentsCount: 0,
+        assignmentsSample: [],
+        tombstonesCount: 0,
+        tombstonesAll: [],
+      };
+      if (metaCell.trim()) {
+        try {
+          const parsed = JSON.parse(metaCell) as {
+            sheetDbVersion?: number;
+            assignments?: { id: string; title: string }[];
+            tombstones?: { kind: string; id: string; deletedAt: number }[];
+          };
+          metaSummary = {
+            parsed: true,
+            sheetDbVersion: parsed.sheetDbVersion,
+            assignmentsCount: parsed.assignments?.length ?? 0,
+            assignmentsSample: (parsed.assignments ?? []).slice(0, 5).map((a) => ({
+              id: a.id,
+              title: a.title,
+            })),
+            tombstonesCount: parsed.tombstones?.length ?? 0,
+            tombstonesAll: parsed.tombstones ?? [],
+          };
+        } catch (e) {
+          metaSummary.parsed = false;
+          void e;
+        }
+      }
+
+      return {
+        metaCellLen: metaCell.length,
+        meta: metaSummary,
+        assignmentsTabRowCount: Math.max(0, assignmentRows.length - 1),
+        assignmentsTabSample: assignmentRows.slice(0, 6),
+      };
+    });
+    steps.push(sheetStateRes.step);
+
+    return json(200, {
+      env,
+      steps,
+      sheetState: sheetStateRes.value ?? null,
+      conclusion:
+        sheetStateRes.step.ok
+          ? "정상. 'sheetState'에 시트의 실제 assignments/tombstones를 확인하세요."
+          : "시트 상태 읽기 실패.",
+    });
   }
 
   return json(200, {

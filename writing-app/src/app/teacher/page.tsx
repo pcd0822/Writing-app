@@ -361,7 +361,32 @@ export default function TeacherPage() {
       saveTeacherDb(next, { skipRemotePush: true });
       if (sid) {
         try {
-          await pushDbToSheet(sid, next, { skipPullMerge: true });
+          // pre-pull merge로 다른 디바이스의 동시 변경을 union하면서, 우리
+          // tombstone(deletedAssignment/Class)은 applyTombstones에서 cascade로 시트의
+          // 같은 id를 제거한다. 다른 디바이스의 stale push가 거의 동시 일어나도,
+          // 그 push도 결국 시트의 tombstone을 union하여 cascade로 잘리기 때문에
+          // 삭제가 안정적으로 정착된다.
+          await pushDbToSheet(sid, next);
+
+          // 정착 검증: 우리가 추가한 tombstone이 실제 시트의 meta에 들어갔는지
+          // 확인해, race로 누락됐다면 한 번 더 push해 정착시킨다.
+          const verify = await pullDbFromSheetWithRetry(sid, {
+            attempts: 2,
+            delayMs: 700,
+          });
+          if (verify.db) {
+            const sheetDb = verify.db as TeacherDb;
+            const sheetTombKey = new Set(
+              (sheetDb.tombstones || []).map((t) => `${t.kind}:${t.id}`),
+            );
+            const myKey = `${deleteTarget.kind}:${deleteTarget.id}`;
+            if (!sheetTombKey.has(myKey)) {
+              console.warn(
+                "[Writing app] delete tombstone not on sheet after push, re-pushing",
+              );
+              await pushDbToSheet(sid, loadTeacherDb());
+            }
+          }
         } catch (e) {
           console.error("[Writing app] delete push failed:", e);
           setSyncStatus({
