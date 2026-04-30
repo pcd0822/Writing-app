@@ -82,14 +82,9 @@ export function SpreadsheetSetupModal({ isOpen, onClose, onSaved }: Props) {
         setStage("merging");
         const remoteDb = result.db as TeacherDb;
         const merged = mergeTeacherDbs(local, remoteDb);
-        saveTeacherDb(merged, { skipRemotePush: true });
-        // 로컬에만 있던 항목을 시트에도 정착(다른 디바이스에서 보이도록).
-        try {
-          setStage("uploading");
-          await pushDbToSheet(id, merged, { skipPullMerge: true });
-        } catch (e) {
-          console.warn("[Writing app] sheet-setup post-push failed:", e);
-        }
+        // saveTeacherDb로 코얼레싱 push 트리거 → push가 자체 pre-pull merge로
+        // 다른 디바이스의 동시 변경을 union하므로 안전.
+        saveTeacherDb(merged);
         const totalStudents = (merged.classes || []).reduce(
           (sum, c) => sum + (c.students?.length || 0),
           0,
@@ -132,7 +127,8 @@ export function SpreadsheetSetupModal({ isOpen, onClose, onSaved }: Props) {
     try {
       setStage("uploading");
       const local = loadTeacherDb();
-      await pushDbToSheet(pendingUpload.id, local, { skipPullMerge: true });
+      // 명시 업로드도 pre-pull merge로 다른 디바이스 데이터를 보존하면서 업로드.
+      await pushDbToSheet(pendingUpload.id, local);
       const totalStudents = (local.classes || []).reduce(
         (sum, c) => sum + (c.students?.length || 0),
         0,

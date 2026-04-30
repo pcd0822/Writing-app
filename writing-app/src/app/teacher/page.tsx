@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../providers";
 import { signOutCurrentUser } from "@/lib/auth";
@@ -49,8 +49,16 @@ export default function TeacherPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStage, setSyncStage] = useState<
-    null | "flushing" | "pulling" | "retrying" | "merging" | "pushing"
+    | null
+    | "flushing"
+    | "pulling"
+    | "retrying"
+    | "merging"
+    | "pushing"
+    | "polling"
   >(null);
+  const [pollingElapsed, setPollingElapsed] = useState(0);
+  const syncCancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const [syncStatus, setSyncStatus] = useState<{
     kind: "ok" | "empty" | "warn" | "err";
     msg: string;
@@ -136,76 +144,55 @@ export default function TeacherPage() {
   }
 
   /**
-   * 시트에서 원격 DB를 가져와 로컬과 양방향 머지 후 시트에 다시 push.
+   * 시트에서 원격 DB를 가져와 로컬과 양방향 머지.
    *
-   * 핵심 안전장치:
-   *  - pull은 retry로 시트 propagation lag(다른 교사가 막 push한 직후 일시적
-   *    빈 결과)를 흡수한다.
-   *  - "빈 시트"로 확정돼도 로컬을 자동으로 시트에 덮어쓰지 않는다. 다른 교사의
-   *    데이터가 lag로 빈 결과로 보일 때 우리 로컬을 자동 업로드하면 그 데이터를
-   *    덮어쓰는 데이터 손실이 발생하기 때문. 빈 결과 시에는 사용자에게 안내.
+   * 안전성 설계:
+   *  - pull은 retry로 시트 propagation lag를 흡수.
+   *  - 빈 결과여도 로컬을 자동으로 시트에 덮어쓰지 않는다(데이터 손실 방지).
+   *  - **push back은 직접 호출하지 않고 saveTeacherDb로 코얼레싱에 위임**한다.
+   *    코얼레싱 push 자체가 pre-pull merge로 안전하게 다른 디바이스의 변경을
+   *    union하므로, 이번 머지 시점에 lag로 share가 비어있어도 800ms 뒤의
+   *    코얼레싱 push가 시트의 최신 share를 다시 보존한다.
+   *  - **활성 공유링크 long polling**: 머지 결과에 active share가 0인데 시트에
+   *    공유가 있을 가능성(lag)이 있으므로, 사용자가 명시 취소 또는 share 발견 또는
+   *    timeout(180초)까지 5초 간격 polling. 그 동안 로딩 오버레이 유지.
    */
+  function cancelOngoingSync() {
+    syncCancelRef.current.cancelled = true;
+  }
+
   async function syncFromSheet(silent = false) {
     if (typeof window === "undefined") return;
     const sid = loadTeacherSettings()?.spreadsheetId;
     if (!sid) {
-      if (!silent) setSyncStatus({ kind: "err", msg: "먼저 'DB 연결'에서 스프레드시트 ID를 등록해주세요." });
+      if (!silent)
+        setSyncStatus({ kind: "err", msg: "먼저 'DB 연결'에서 스프레드시트 ID를 등록해주세요." });
       return;
     }
+    syncCancelRef.current = { cancelled: false };
     if (!silent) setIsSyncing(true);
     setSyncStatus(null);
+    setPollingElapsed(0);
     try {
       setActiveSpreadsheetId(sid);
 
-      // 1) 진행 중인 변경을 먼저 시트에 반영해야 다른 디바이스가 가져갈 수 있다.
+      // 1) 진행 중인 변경을 먼저 시트에 반영
       setSyncStage("flushing");
       await flushPendingPush(sid);
+      if (syncCancelRef.current.cancelled) return;
 
-      // 2) 시트에서 최신 상태 pull (시트 lag 대응 retry).
+      // 2) 시트에서 최신 상태 pull (시트 lag 대응 retry)
       setSyncStage("pulling");
       const result = await pullDbFromSheetWithRetry(sid, {
         attempts: 3,
         delayMs: 900,
-        onAttempt: (n, total) => {
+        onAttempt: (n) => {
           if (n > 1) setSyncStage("retrying");
-          // retry 시점 표시는 onAttempt로 갱신. 첫 시도는 "pulling" 유지.
-          void total;
         },
       });
+      if (syncCancelRef.current.cancelled) return;
 
-      if (result.db) {
-        // 3) 로컬과 머지 → 로컬 갱신 → 시트 재반영(양방향 수렴).
-        setSyncStage("merging");
-        const remoteDb = result.db as TeacherDb;
-        const local = loadTeacherDb();
-        const merged = mergeTeacherDbs(local, remoteDb);
-        saveTeacherDb(merged, { skipRemotePush: true });
-
-        setSyncStage("pushing");
-        try {
-          await pushDbToSheet(sid, merged, { skipPullMerge: true });
-        } catch (e) {
-          console.warn("[Writing app] sync post-push failed:", e);
-        }
-
-        const totalStudents = (merged.classes || []).reduce(
-          (sum, c) => sum + (c.students?.length || 0),
-          0,
-        );
-        const activeShares = (merged.shares || []).filter(
-          (s) => !s.revokedAt && Date.now() < s.expiresAt,
-        ).length;
-        setSyncStatus({
-          kind: "ok",
-          msg:
-            `시트와 양방향 동기화 완료 — 학급 ${merged.classes?.length || 0}개 · ` +
-            `학생 ${totalStudents}명 · 과제 ${merged.assignments?.length || 0}개 · ` +
-            `활성 공유링크 ${activeShares}개`,
-        });
-        refreshDb();
-      } else {
-        // 빈 시트로 확정. 로컬 데이터가 있어도 자동 업로드는 하지 않음
-        // (다른 교사의 데이터를 lag 인식으로 덮어쓰는 위험 방지).
+      if (!result.db) {
         const local = loadTeacherDb();
         const hasLocalData =
           (local.classes?.length || 0) > 0 ||
@@ -225,11 +212,73 @@ export default function TeacherPage() {
               "시트에 저장된 데이터가 없습니다. (다른 디바이스에서 한 번도 저장되지 않았거나 시트 ID가 다를 수 있습니다)",
           });
         }
+        return;
       }
+
+      // 3) 머지 → 로컬 갱신. push back은 saveTeacherDb로 코얼레싱에 위임.
+      setSyncStage("merging");
+      let mergedDb: TeacherDb = mergeTeacherDbs(loadTeacherDb(), result.db as TeacherDb);
+      saveTeacherDb(mergedDb); // skipRemotePush 기본 false → 코얼레싱 push가 pre-pull merge
+
+      // 4) 활성 공유링크 long polling — 시트 propagation lag로 share가 늦게
+      //    도착하는 경우(1~2분) 사용자가 모달에서 기다릴 수 있게 polling.
+      const countActive = (db: TeacherDb) =>
+        (db.shares || []).filter((s) => !s.revokedAt && Date.now() < s.expiresAt).length;
+      let activeShares = countActive(mergedDb);
+
+      if (activeShares === 0) {
+        setSyncStage("polling");
+        const POLL_INTERVAL_MS = 5000;
+        const POLL_TIMEOUT_MS = 180_000; // 3분
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+          if (syncCancelRef.current.cancelled) break;
+          // 1초 단위로 elapsed 갱신
+          for (let waited = 0; waited < POLL_INTERVAL_MS; waited += 1000) {
+            if (syncCancelRef.current.cancelled) break;
+            await new Promise((r) => setTimeout(r, 1000));
+            setPollingElapsed(Math.floor((Date.now() - startedAt) / 1000));
+          }
+          if (syncCancelRef.current.cancelled) break;
+
+          // 짧은 retry로 시트 한 번 더 조회
+          const r2 = await pullDbFromSheetWithRetry(sid, { attempts: 2, delayMs: 500 });
+          if (syncCancelRef.current.cancelled) break;
+          if (!r2.db) continue;
+          const next = mergeTeacherDbs(loadTeacherDb(), r2.db as TeacherDb);
+          if (countActive(next) > 0) {
+            mergedDb = next;
+            saveTeacherDb(mergedDb);
+            activeShares = countActive(mergedDb);
+            break;
+          }
+        }
+      }
+
+      const totalStudents = (mergedDb.classes || []).reduce(
+        (sum, c) => sum + (c.students?.length || 0),
+        0,
+      );
+      if (syncCancelRef.current.cancelled) {
+        setSyncStatus({
+          kind: "warn",
+          msg: `동기화는 진행됐지만 활성 공유링크 propagation 대기를 취소했습니다. 잠시 후 다시 동기화해주세요. (학급 ${mergedDb.classes?.length || 0}개 · 학생 ${totalStudents}명 · 과제 ${mergedDb.assignments?.length || 0}개)`,
+        });
+      } else {
+        setSyncStatus({
+          kind: "ok",
+          msg:
+            `시트와 양방향 동기화 완료 — 학급 ${mergedDb.classes?.length || 0}개 · ` +
+            `학생 ${totalStudents}명 · 과제 ${mergedDb.assignments?.length || 0}개 · ` +
+            `활성 공유링크 ${activeShares}개`,
+        });
+      }
+      refreshDb();
     } catch (e) {
       setSyncStatus({ kind: "err", msg: (e as Error).message || "동기화 실패" });
     } finally {
       setSyncStage(null);
+      setPollingElapsed(0);
       setIsSyncing(false);
     }
   }
@@ -352,13 +401,15 @@ export default function TeacherPage() {
         return "다른 디바이스의 변경과 병합하는 중…";
       case "pushing":
         return "병합 결과를 시트에 반영하는 중…";
+      case "polling":
+        return `활성 공유링크 동기화 대기 중 (${pollingElapsed}초 / 최대 180초). 시트 propagation에 1~2분 걸릴 수 있습니다.`;
       default:
         return "준비 중…";
     }
   })();
 
-  // 진행 단계 도트(시각화). 각 단계가 완료되면 done, 현재 단계는 active.
-  const stageOrder = ["flushing", "pulling", "merging", "pushing"] as const;
+  // 진행 단계 도트(시각화). polling은 5번째 단계로 표시.
+  const stageOrder = ["flushing", "pulling", "merging", "polling"] as const;
   const stageStatus = (s: (typeof stageOrder)[number]): "done" | "active" | "pending" => {
     const idx = stageOrder.indexOf(s);
     const cur = syncStage === "retrying" ? "pulling" : syncStage;
@@ -380,7 +431,11 @@ export default function TeacherPage() {
         >
           <div className={styles.syncCard}>
             <div className={styles.syncSpinner} />
-            <div className={styles.syncTitle}>동기화 진행 중</div>
+            <div className={styles.syncTitle}>
+              {syncStage === "polling"
+                ? "활성 공유링크 동기화 대기 중"
+                : "동기화 진행 중"}
+            </div>
             <div className={styles.syncStageMsg}>{syncStageLabel}</div>
             <div className={styles.syncSteps} aria-hidden="true">
               {stageOrder.map((s) => {
@@ -394,6 +449,16 @@ export default function TeacherPage() {
                 return <span key={s} className={cls} />;
               })}
             </div>
+            {syncStage === "polling" ? (
+              <button
+                type="button"
+                onClick={cancelOngoingSync}
+                className={styles.tinyButton}
+                style={{ marginTop: 8 }}
+              >
+                기다리지 않고 닫기
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
