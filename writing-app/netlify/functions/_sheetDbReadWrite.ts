@@ -7,10 +7,11 @@ import {
   isTabularSlimEmpty,
   MAX_CELL_CHARS,
   mergeChunksIntoDb,
+  parseTabularSubmissions,
   toSlimDbForMeta,
   wrapMetaPayload,
 } from "./_sheetDbV2";
-import type { TeacherDb } from "../../src/lib/types";
+import type { Submission, TeacherDb } from "../../src/lib/types";
 import { TeacherDbSchema } from "../../src/lib/types";
 
 /**
@@ -21,17 +22,11 @@ import { TeacherDbSchema } from "../../src/lib/types";
 const SHEETS_RPC_TIMEOUT_MS = 9000;
 const SHEETS_RPC_OPTS = { timeout: SHEETS_RPC_TIMEOUT_MS } as const;
 
-function tryParseMeta(
-  metaCell: string | undefined,
-  chunks: {
-    assignmentText: string[][];
-    submissionText: string[][];
-    feedbackText: string[][];
-    aiLogText: string[][];
-    scoreText: string[][];
-    extraText: string[][];
-  },
-): TeacherDb | null {
+/**
+ * meta!A1을 파싱해 slim DB를 반환. 청크 머지는 호출자가 별도로 mergeChunksIntoDb를
+ * 호출해 처리한다(meta 경로에서 tabular submissions union을 끼워넣기 위함).
+ */
+function tryParseSlimMeta(metaCell: string | undefined): TeacherDb | null {
   if (!metaCell?.trim()) return null;
   let parsed: unknown;
   try {
@@ -42,13 +37,27 @@ function tryParseMeta(
 
   if (isSheetDbV2Meta(parsed)) {
     const slim = TeacherDbSchema.safeParse(parsed);
-    if (!slim.success) return null;
-    return mergeChunksIntoDb(slim.data, chunks);
+    return slim.success ? slim.data : null;
   }
 
   // 구버전 호환: 메타가 v2 마커 없는 경우 그대로 시도
   const v = TeacherDbSchema.safeParse(parsed);
   return v.success ? v.data : null;
+}
+
+/**
+ * meta의 submissions와 tabular의 submissions를 id 기준 union. 같은 id가 양쪽에 있으면
+ * tabular 우선(partial endpoint가 항상 tabular를 fresh하게 갱신하므로). meta에만
+ * 있는 submission은 그대로 두어 풀-DB push로 들어온 데이터를 보존.
+ */
+function unionSubmissions(
+  metaSubs: TeacherDb["submissions"],
+  tabularSubs: Submission[],
+): TeacherDb["submissions"] {
+  const byId = new Map<string, Submission>();
+  for (const s of metaSubs) byId.set(s.id, s);
+  for (const s of tabularSubs) byId.set(s.id, s);
+  return Array.from(byId.values());
 }
 
 export async function readTeacherDbFromSpreadsheet(
@@ -95,9 +104,23 @@ export async function readTeacherDbFromSpreadsheet(
     extraText: (valueRanges[6]?.values || []) as string[][],
   };
 
-  // 1) 빠른 경로: meta!A1에서 시도
-  const fromMeta = tryParseMeta(metaCell, chunks);
-  if (fromMeta) return fromMeta;
+  // submissions 표 시트는 meta 경로에서도 사용한다.
+  // partial update endpoint(`db-set-submission`)는 meta!A1을 안 건드리고 이 시트와
+  // 청크만 갱신하므로, meta만 보면 다른 디바이스에서 partial로 추가된 submission이
+  // 누락된다. 따라서 meta 경로에서도 이 시트를 함께 union한다.
+  const tabularSubmissions = parseTabularSubmissions(
+    (valueRanges[12]?.values || []) as string[][],
+  );
+
+  // 1) 빠른 경로: meta!A1에서 slim 추출 + tabular submissions union → 청크 머지
+  const slimFromMeta = tryParseSlimMeta(metaCell);
+  if (slimFromMeta) {
+    const mergedSlim: TeacherDb = {
+      ...slimFromMeta,
+      submissions: unionSubmissions(slimFromMeta.submissions, tabularSubmissions),
+    };
+    return mergeChunksIntoDb(mergedSlim, chunks);
+  }
 
   // 2) Fallback: tabular 시트에서 재구성 (meta 비었거나 / 깨진 JSON / 구 스키마 등 모든 실패 시)
   const tabularSlim = buildSlimDbFromTabular({
@@ -123,7 +146,7 @@ export async function readTeacherDbFromSpreadsheet(
     // diag 정보를 던져서 db-get이 응답에 포함하도록 함
     const diag = {
       metaCellLen: metaCell?.length || 0,
-      metaParsed: metaCell?.trim() ? !!tryParseMeta(metaCell, chunks) : false,
+      metaParsed: metaCell?.trim() ? !!tryParseSlimMeta(metaCell) : false,
       tabularRowCounts: {
         classes: (valueRanges[7]?.values || []).length,
         students: (valueRanges[8]?.values || []).length,

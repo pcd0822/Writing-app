@@ -725,7 +725,11 @@ export function getOrCreateSubmission(params: {
     currentStep: 1,
   };
   const next = { ...db, submissions: [submission, ...db.submissions] };
-  saveTeacherDb(next);
+  // 빈 submission은 시트에 push하지 않는다. 학생이 GRASPS·저장·제출 등 명시 액션을
+  // 했을 때 partial endpoint가 submissions tabular에 행을 append하므로,
+  // 시트에는 의미 있는 데이터만 남는다(빈 행 누적 방지 + 첫 진입 시 풀-DB push가 quota·
+  // timeout으로 실패해 submission 자체가 시트에 안 들어가던 문제도 동시 해결).
+  saveTeacherDb(next, { skipRemotePush: true });
   return { db: next, submission };
 }
 

@@ -319,6 +319,49 @@ function rowsAfterHeader(rows: string[][]): string[][] {
 }
 
 /**
+ * submissions 표 시트(`submissions!A:N`) 행 파싱. meta 경로와 fallback 경로 양쪽에서
+ * 재사용된다. partial update endpoint(`db-set-submission`)는 시트 전체가 아니라
+ * 이 표 시트와 청크 시트만 갱신하므로, meta 경로에서도 이 결과를 union해야 다른
+ * 디바이스에서 partial endpoint가 추가/갱신한 submission을 인지할 수 있다.
+ */
+export function parseTabularSubmissions(rows: string[][]): TeacherDb["submissions"] {
+  return rowsAfterHeader(rows)
+    .map((row) => {
+      const id = String(row[0] ?? "");
+      const assignmentId = String(row[1] ?? "");
+      const classId = String(row[2] ?? "");
+      const studentNo = String(row[3] ?? "");
+      if (!id || !assignmentId || !classId || !studentNo) return null;
+      return {
+        id,
+        assignmentId,
+        classId,
+        studentNo,
+        createdAt: num(row[4]) ?? Date.now(),
+        updatedAt: num(row[5]) ?? Date.now(),
+        outlineText: "",
+        draftText: "",
+        reviseText: "",
+        outlineSubmittedAt: num(row[6]),
+        draftSubmittedAt: num(row[7]),
+        reviseSubmittedAt: num(row[8]),
+        outlineApprovedAt: num(row[9]),
+        draftApprovedAt: num(row[10]),
+        reviseApprovedAt: num(row[11]),
+        finalApprovedAt: num(row[12]),
+        finalReportPublishedAt: num(row[13]),
+        finalReportSnapshot: "",
+        graspData: "",
+        outlineRejectReason: "",
+        draftRejectReason: "",
+        reviseRejectReason: "",
+        currentStep: 1,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+}
+
+/**
  * meta!A1이 비어 있을 때, 표 시트(classes/students/assignments/...)에서 slim DB를 재구성합니다.
  * 청크 시트 결합은 이후 mergeChunksIntoDb가 처리합니다.
  */
@@ -425,41 +468,9 @@ export function buildSlimDbFromTabular(tab: {
     })
     .filter((x): x is NonNullable<typeof x> => !!x);
 
-  // submissions (id, assignmentId, classId, studentNo, createdAt, updatedAt, ...timestamps)
-  const submissions = rowsAfterHeader(tab.submissions)
-    .map((row) => {
-      const id = String(row[0] ?? "");
-      const assignmentId = String(row[1] ?? "");
-      const classId = String(row[2] ?? "");
-      const studentNo = String(row[3] ?? "");
-      if (!id || !assignmentId || !classId || !studentNo) return null;
-      return {
-        id,
-        assignmentId,
-        classId,
-        studentNo,
-        createdAt: num(row[4]) ?? Date.now(),
-        updatedAt: num(row[5]) ?? Date.now(),
-        outlineText: "",
-        draftText: "",
-        reviseText: "",
-        outlineSubmittedAt: num(row[6]),
-        draftSubmittedAt: num(row[7]),
-        reviseSubmittedAt: num(row[8]),
-        outlineApprovedAt: num(row[9]),
-        draftApprovedAt: num(row[10]),
-        reviseApprovedAt: num(row[11]),
-        finalApprovedAt: num(row[12]),
-        finalReportPublishedAt: num(row[13]),
-        finalReportSnapshot: "",
-        graspData: "",
-        outlineRejectReason: "",
-        draftRejectReason: "",
-        reviseRejectReason: "",
-        currentStep: 1,
-      };
-    })
-    .filter((x): x is NonNullable<typeof x> => !!x);
+  // submissions tabular 시트 파싱은 meta 경로에서도 partial endpoint가 추가한 행을
+  // 인지하기 위해 재사용된다.
+  const submissions = parseTabularSubmissions(tab.submissions);
 
   // feedback_notes (id, submissionId, stage, createdAt, start, end, resolvedAt)
   const feedbackNotes = rowsAfterHeader(tab.feedback_notes)
