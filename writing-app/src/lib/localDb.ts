@@ -22,6 +22,7 @@ import {
   pullDbFromSheet,
   pullDbFromSheetWithRetry,
   pushDbToSheetCoalesced,
+  pushSubmissionPartialCoalesced,
   setActiveSpreadsheetId,
 } from "./spreadsheetSync";
 
@@ -173,7 +174,15 @@ export function loadTeacherDb(): TeacherDb {
 
 export function saveTeacherDb(
   db: TeacherDb,
-  options?: { spreadsheetId?: string | null; skipRemotePush?: boolean },
+  options?: {
+    spreadsheetId?: string | null;
+    skipRemotePush?: boolean;
+    /**
+     * 학생 path는 자기 submission/관련 청크만 변경하므로 push 직전 풀-DB pull-merge가
+     * 거의 무의미하고 quota를 두 배로 쓴다. true면 pre-pull을 건너뛴다.
+     */
+    studentPush?: boolean;
+  },
 ) {
   assertBrowser();
   const normalized = normalizeDriveAttachmentsInDb(db);
@@ -183,7 +192,9 @@ export function saveTeacherDb(
     (options?.spreadsheetId && String(options.spreadsheetId).trim()) ||
     getActiveSpreadsheetId();
   if (pushId) {
-    pushDbToSheetCoalesced(pushId, normalized);
+    pushDbToSheetCoalesced(pushId, normalized, {
+      skipPullMerge: options?.studentPush === true,
+    });
   }
 }
 
@@ -785,6 +796,103 @@ export async function updateSubmissionWithRemoteMerge(
   return updateSubmission(submissionId, patch, { spreadsheetId: sid });
 }
 
+/**
+ * 키 입력 자동저장용 — localStorage만 갱신하고 시트 push는 하지 않는다.
+ * 학생이 명시적으로 "저장하기/제출하기"를 누를 때만 시트로 보낸다.
+ */
+export function updateSubmissionLocalOnly(
+  submissionId: string,
+  patch: Partial<Submission>,
+): Submission {
+  const db = loadTeacherDb();
+  const idx = db.submissions.findIndex((s) => s.id === submissionId);
+  if (idx < 0) throw new Error("submission not found");
+  const updated = {
+    ...db.submissions[idx]!,
+    ...patch,
+    updatedAt: Date.now(),
+  };
+  const nextSubmissions = [...db.submissions];
+  nextSubmissions[idx] = updated;
+  saveTeacherDb({ ...db, submissions: nextSubmissions }, { skipRemotePush: true });
+  return updated;
+}
+
+/**
+ * 학생 명시 저장/제출용 — pre-pull merge 없이 localStorage 업데이트 후 시트 push 큐잉.
+ * 키 입력당 한 번씩 발생하던 read 호출을 0회로 만들기 위한 핵심 path.
+ */
+export function updateSubmissionAndPushStudent(
+  submissionId: string,
+  patch: Partial<Submission>,
+  options?: { spreadsheetId?: string | null },
+): Submission {
+  const sid = options?.spreadsheetId?.trim() || getActiveSpreadsheetId();
+  if (sid) setActiveSpreadsheetId(sid);
+  const db = loadTeacherDb();
+  const idx = db.submissions.findIndex((s) => s.id === submissionId);
+  if (idx < 0) throw new Error("submission not found");
+  const updated = {
+    ...db.submissions[idx]!,
+    ...patch,
+    updatedAt: Date.now(),
+  };
+  const nextSubmissions = [...db.submissions];
+  nextSubmissions[idx] = updated;
+  saveTeacherDb(
+    { ...db, submissions: nextSubmissions },
+    { spreadsheetId: sid, studentPush: true },
+  );
+  return updated;
+}
+
+/**
+ * 학생 partial endpoint(`db-set-submission`) 전용 path. 풀-DB push 대신 학생 자기
+ * submission만 전송한다.
+ *  - 시트 페이로드: 학생 1명분 → 9초 timeout 위험 사실상 0
+ *  - 동시성: 다른 학생 행을 안 건드림 → race-free
+ *
+ * 인증 데이터(shareToken/studentNo/studentCode)는 share landing 단계에서 검증된
+ * 값을 호출자가 전달한다. 서버에서도 students/shares 시트와 다시 대조한다.
+ */
+export function updateSubmissionAndPushPartial(
+  submissionId: string,
+  patch: Partial<Submission>,
+  auth: {
+    spreadsheetId: string;
+    shareToken: string;
+    studentNo: string;
+    studentCode: string;
+  },
+): Submission {
+  setActiveSpreadsheetId(auth.spreadsheetId);
+  const db = loadTeacherDb();
+  const idx = db.submissions.findIndex((s) => s.id === submissionId);
+  if (idx < 0) throw new Error("submission not found");
+  const updated = {
+    ...db.submissions[idx]!,
+    ...patch,
+    updatedAt: Date.now(),
+  };
+  const nextSubmissions = [...db.submissions];
+  nextSubmissions[idx] = updated;
+  // localStorage는 정상적으로 갱신하되 풀-DB push는 막는다(partial endpoint가 대신 처리).
+  saveTeacherDb(
+    { ...db, submissions: nextSubmissions },
+    { skipRemotePush: true },
+  );
+  pushSubmissionPartialCoalesced({
+    spreadsheetId: auth.spreadsheetId,
+    shareToken: auth.shareToken,
+    studentNo: auth.studentNo,
+    studentCode: auth.studentCode,
+    submission: updated,
+    // graspData는 patch에 들어 있을 때만 보낸다(없으면 undefined → 서버는 청크 그대로 둠).
+    graspData: patch.graspData,
+  });
+  return updated;
+}
+
 export function createFeedbackNoteId() {
   return nanoid(12);
 }
@@ -808,18 +916,25 @@ export function resolveFeedbackNote(
       n.id === noteId ? { ...n, resolvedAt: now } : n,
     ),
   };
-  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId });
+  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId, studentPush: true });
 }
 
+/**
+ * AI 로그 추가는 학생 path 전용. 같은 학생이 동시에 여러 디바이스에서 작업하지
+ * 않으므로 push 직전 풀-DB pull은 quota만 소모할 뿐 의미가 없어 제거했다.
+ * 호출자 시그니처(`await addAiLog(...)`)와 호환을 위해 async로 유지.
+ */
 export async function addAiLog(
   log: AiLog,
   options?: { spreadsheetId?: string | null },
 ) {
   const sid = options?.spreadsheetId?.trim() || getActiveSpreadsheetId();
   if (sid) setActiveSpreadsheetId(sid);
-  await mergeStudentViewFromRemote(sid);
   const db = loadTeacherDb();
-  saveTeacherDb({ ...db, aiLogs: [log, ...db.aiLogs] }, { spreadsheetId: sid });
+  saveTeacherDb(
+    { ...db, aiLogs: [log, ...db.aiLogs] },
+    { spreadsheetId: sid, studentPush: true },
+  );
 }
 
 export function upsertScore(score: Score) {
@@ -866,7 +981,7 @@ export function addStepTransition(
   const db = loadTeacherDb();
   saveTeacherDb(
     { ...db, stepTransitions: [...db.stepTransitions, transition] },
-    { spreadsheetId: options?.spreadsheetId },
+    { spreadsheetId: options?.spreadsheetId, studentPush: true },
   );
 }
 
@@ -879,7 +994,7 @@ export function addAiInteraction(
   const db = loadTeacherDb();
   saveTeacherDb(
     { ...db, aiInteractions: [...db.aiInteractions, interaction] },
-    { spreadsheetId: options?.spreadsheetId },
+    { spreadsheetId: options?.spreadsheetId, studentPush: true },
   );
 }
 
@@ -895,7 +1010,7 @@ export function updateAiInteractionAction(
       i.id === interactionId ? { ...i, action } : i,
     ),
   };
-  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId });
+  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId, studentPush: true });
 }
 
 // ── Teacher Comment CRUD ────────────────────────────────────────
@@ -922,7 +1037,7 @@ export function markCommentRead(
       c.id === commentId ? { ...c, readAt: Date.now() } : c,
     ),
   };
-  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId });
+  saveTeacherDb(next, { spreadsheetId: options?.spreadsheetId, studentPush: true });
 }
 
 // ── GRASP helpers ───────────────────────────────────────────────

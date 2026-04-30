@@ -1,6 +1,6 @@
 import { prepareDbForSheetPush } from "./attachments";
 import { callFunction } from "./netlifyClient";
-import type { TeacherDb } from "./types";
+import type { Submission, TeacherDb } from "./types";
 
 const ACTIVE_SID_KEY = "writing-app:activeSpreadsheetId";
 
@@ -114,11 +114,26 @@ export async function pushDbToSheet(
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pushPending = new Map<string, unknown>();
 const pushInflight = new Map<string, Promise<void>>();
+/**
+ * 코얼레싱 창 동안의 옵션은 latest-wins. 학생 측에서 한 번이라도 studentPush:true로
+ * 호출되면 그 창의 push는 pre-push pull을 생략한다(자기 submission만 건드리므로 안전).
+ */
+const pushOptions = new Map<string, { skipPullMerge?: boolean }>();
 
 const COALESCE_DELAY_MS = 800;
 
-export function pushDbToSheetCoalesced(spreadsheetId: string, db: unknown) {
+export type PushCoalesceOptions = {
+  /** true면 push 직전 pull-merge를 생략. 학생용 path에서 사용. */
+  skipPullMerge?: boolean;
+};
+
+export function pushDbToSheetCoalesced(
+  spreadsheetId: string,
+  db: unknown,
+  options?: PushCoalesceOptions,
+) {
   pushPending.set(spreadsheetId, db);
+  if (options) pushOptions.set(spreadsheetId, options);
   const existing = pushTimers.get(spreadsheetId);
   if (existing) clearTimeout(existing);
 
@@ -143,8 +158,10 @@ async function runPendingPush(spreadsheetId: string) {
   const latest = pushPending.get(spreadsheetId);
   if (latest === undefined) return;
   pushPending.delete(spreadsheetId);
+  const opts = pushOptions.get(spreadsheetId);
+  pushOptions.delete(spreadsheetId);
 
-  const promise = pushDbToSheet(spreadsheetId, latest)
+  const promise = pushDbToSheet(spreadsheetId, latest, opts)
     .then(async (merged) => {
       // 머지된 결과를 로컬에도 흡수해서 다른 교사가 추가한 항목이 다음 화면 갱신에
       // 보이도록 한다. 단, 코얼레싱 도중 사용자가 또 입력했을 수 있어 현재 로컬과
@@ -175,6 +192,115 @@ async function runPendingPush(spreadsheetId: string) {
     });
   pushInflight.set(spreadsheetId, promise);
   await promise;
+}
+
+// ── 학생 단위 부분 업데이트 ───────────────────────────────────
+//
+// 학생 자기 submission 데이터(본문·타임스탬프·GRASPS)만 시트에 부분적으로 쓴다.
+// 시트 전체 16개를 wholesale rewrite하던 기존 db-set 대비:
+//  - 페이로드: 학생 1명분 → 9초 timeout 위험 사실상 0
+//  - 동시성: 다른 학생의 행은 절대 안 건드림 → 30명 동시 업데이트도 race-free
+//
+// 인증 데이터(shareToken, studentNo, studentCode)는 share landing 단계에서 학생이
+// 직접 입력해 검증된 값을 sessionStorage로 보관 후 호출자가 전달한다. 서버에서도
+// students/shares 시트와 다시 대조하므로 이중 검증.
+
+export type PushSubmissionPartialPayload = {
+  spreadsheetId: string;
+  shareToken: string;
+  studentNo: string;
+  studentCode: string;
+  submission: Submission;
+  /** GRASPS 맥락 설계 JSON. 변경됐을 때만 전달. 없으면 청크 기존 값 유지. */
+  graspData?: string;
+};
+
+/**
+ * 학생용 partial push. 키 입력 자동저장이 아니라 명시적 저장/제출/GRASPS 저장 시에만
+ * 호출되도록 한다. 자동저장은 localStorage만 쓰는 정책을 유지.
+ */
+export async function pushSubmissionPartial(
+  payload: PushSubmissionPartialPayload,
+): Promise<void> {
+  await callFunction<{ ok: true }>("db-set-submission", payload);
+}
+
+/**
+ * 같은 submission에 대해 빠르게 연속되는 partial push를 묶는다. coalesce 창 동안 마지막
+ * payload만 살아남고, 진행 중 push가 있으면 끝난 뒤에 다음을 보낸다(latest-wins).
+ */
+const partialPending = new Map<string, PushSubmissionPartialPayload>();
+const partialTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const partialInflight = new Map<string, Promise<void>>();
+const PARTIAL_COALESCE_DELAY_MS = 600;
+
+function partialKey(p: PushSubmissionPartialPayload) {
+  return `${p.spreadsheetId}::${p.submission.id}`;
+}
+
+export function pushSubmissionPartialCoalesced(payload: PushSubmissionPartialPayload) {
+  const key = partialKey(payload);
+  partialPending.set(key, payload);
+  const existing = partialTimers.get(key);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    partialTimers.delete(key);
+    void runPendingPartialPush(key);
+  }, PARTIAL_COALESCE_DELAY_MS);
+  partialTimers.set(key, timer);
+}
+
+async function runPendingPartialPush(key: string) {
+  const inflight = partialInflight.get(key);
+  if (inflight) {
+    try {
+      await inflight;
+    } catch {
+      /* 이전 실패는 캐치해서 다음 시도가 막히지 않게 함 */
+    }
+  }
+  const latest = partialPending.get(key);
+  if (!latest) return;
+  partialPending.delete(key);
+
+  const promise = pushSubmissionPartial(latest)
+    .catch((err) => {
+      console.error("[Writing app] pushSubmissionPartial failed:", err);
+      throw err;
+    })
+    .finally(() => {
+      if (partialInflight.get(key) === promise) {
+        partialInflight.delete(key);
+      }
+      if (partialPending.has(key)) {
+        void runPendingPartialPush(key);
+      }
+    });
+  partialInflight.set(key, promise);
+  await promise;
+}
+
+/**
+ * 학생 path에서 코얼레싱 중이거나 진행 중인 partial push가 모두 끝날 때까지 대기.
+ * 제출 모달을 띄우기 전에 await해서, 시트 반영 전에 학생이 탭을 닫는 데이터 손실을 방지.
+ */
+export async function flushPendingPartialPush(
+  spreadsheetId: string,
+  submissionId: string,
+): Promise<void> {
+  const key = `${spreadsheetId}::${submissionId}`;
+  const timer = partialTimers.get(key);
+  if (timer) {
+    clearTimeout(timer);
+    partialTimers.delete(key);
+  }
+  if (partialPending.has(key)) {
+    await runPendingPartialPush(key);
+  } else {
+    const inflight = partialInflight.get(key);
+    // 진행 중인 push가 있으면 그 결과를 그대로 전파(reject 시 호출자도 throw).
+    if (inflight) await inflight;
+  }
 }
 
 /**

@@ -159,14 +159,31 @@ export function mergeChunksIntoDb(
     };
   });
 
-  const submissions = slim.submissions.map((s) => ({
-    ...s,
-    outlineText: subParts.get(`${s.id}\toutline`) ?? "",
-    draftText: subParts.get(`${s.id}\tdraft`) ?? "",
-    reviseText: subParts.get(`${s.id}\trevise`) ?? "",
-    finalReportSnapshot: subParts.get(`${s.id}\tfinalSnapshot`) ?? "",
-    graspData: extraParts.get(`sub:${s.id}\tgraspData`) ?? s.graspData ?? "",
-  }));
+  /**
+   * submission의 timestamps·currentStep·rejectReasons는 partial update endpoint가
+   * meta!A1을 건드리지 않고도 fresh 상태를 반영할 수 있도록 청크의 "state" field에
+   * JSON으로 함께 저장된다. 청크 데이터가 있으면 meta보다 우선시한다.
+   */
+  const submissions = slim.submissions.map((s) => {
+    const stateRaw = subParts.get(`${s.id}\tstate`);
+    let state: Partial<typeof s> = {};
+    if (stateRaw) {
+      try {
+        state = JSON.parse(stateRaw) as Partial<typeof s>;
+      } catch {
+        /* 파싱 실패 시 meta의 값 유지 */
+      }
+    }
+    return {
+      ...s,
+      ...state,
+      outlineText: subParts.get(`${s.id}\toutline`) ?? "",
+      draftText: subParts.get(`${s.id}\tdraft`) ?? "",
+      reviseText: subParts.get(`${s.id}\trevise`) ?? "",
+      finalReportSnapshot: subParts.get(`${s.id}\tfinalSnapshot`) ?? "",
+      graspData: extraParts.get(`sub:${s.id}\tgraspData`) ?? s.graspData ?? "",
+    };
+  });
 
   const feedbackNotes = slim.feedbackNotes.map((n) => ({
     ...n,
@@ -540,6 +557,43 @@ function pushChunks4(id: string, field: string, text: string, out: string[][]) {
   });
 }
 
+/**
+ * submission의 비-text 상태(타임스탬프·승인 상태·거부 사유·currentStep·updatedAt)를
+ * 청크에 직렬화하는 정규 함수. partial update endpoint와 풀 push가 동일한 직렬화를
+ * 쓰도록 한 곳에서 관리한다.
+ */
+export function buildSubmissionStateJson(s: {
+  outlineSubmittedAt: number | null;
+  draftSubmittedAt: number | null;
+  reviseSubmittedAt: number | null;
+  outlineApprovedAt: number | null;
+  draftApprovedAt: number | null;
+  reviseApprovedAt: number | null;
+  finalApprovedAt: number | null;
+  finalReportPublishedAt?: number | null;
+  outlineRejectReason?: string;
+  draftRejectReason?: string;
+  reviseRejectReason?: string;
+  currentStep?: number;
+  updatedAt: number;
+}): string {
+  return JSON.stringify({
+    outlineSubmittedAt: s.outlineSubmittedAt,
+    draftSubmittedAt: s.draftSubmittedAt,
+    reviseSubmittedAt: s.reviseSubmittedAt,
+    outlineApprovedAt: s.outlineApprovedAt,
+    draftApprovedAt: s.draftApprovedAt,
+    reviseApprovedAt: s.reviseApprovedAt,
+    finalApprovedAt: s.finalApprovedAt,
+    finalReportPublishedAt: s.finalReportPublishedAt ?? null,
+    outlineRejectReason: s.outlineRejectReason ?? "",
+    draftRejectReason: s.draftRejectReason ?? "",
+    reviseRejectReason: s.reviseRejectReason ?? "",
+    currentStep: s.currentStep ?? 1,
+    updatedAt: s.updatedAt,
+  });
+}
+
 /** 청크 시트용 행 (헤더 포함) */
 export function buildChunkSheetValues(db: TeacherDb): {
   assignment_text: string[][];
@@ -575,6 +629,9 @@ export function buildChunkSheetValues(db: TeacherDb): {
     pushChunks4(s.id, "draft", s.draftText, submission_text);
     pushChunks4(s.id, "revise", s.reviseText, submission_text);
     pushChunks4(s.id, "finalSnapshot", s.finalReportSnapshot ?? "", submission_text);
+    // partial update endpoint와 호환되는 형식으로 timestamps·currentStep·rejectReasons를
+    // 청크의 state field에 함께 저장. 풀 push에서도 일관성 유지를 위해 동일하게 기록.
+    pushChunks4(s.id, "state", buildSubmissionStateJson(s), submission_text);
     // graspData를 extra_text 청크로 저장
     if (s.graspData) {
       pushChunks4(`sub:${s.id}`, "graspData", s.graspData, extra_text);

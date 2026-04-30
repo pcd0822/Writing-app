@@ -27,7 +27,9 @@ import {
   resolveFeedbackNote,
   stageToStep,
   stepToStage,
-  updateSubmissionWithRemoteMerge,
+  updateSubmissionAndPushPartial,
+  updateSubmissionAndPushStudent,
+  updateSubmissionLocalOnly,
 } from "@/lib/localDb";
 import type {
   AiInteraction,
@@ -44,7 +46,11 @@ import type {
   TeacherDb,
 } from "@/lib/types";
 import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/finalReport";
-import { setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+import {
+  flushPendingPartialPush,
+  flushPendingPush,
+  setActiveSpreadsheetId,
+} from "@/lib/spreadsheetSync";
 
 type FeedbackPanelTab = "outline" | "draft" | "revise" | "final";
 type ViewMode = "write" | "dashboard";
@@ -235,6 +241,48 @@ export default function WritePage() {
     [effectiveSheetId],
   );
 
+  /**
+   * partial update endpoint(`db-set-submission`)에 필요한 인증 정보. share landing의
+   * `onEnter` 단계에서 sessionStorage에 보관한 값을 읽는다. 코드가 없거나 sessionStorage
+   * 사용 불가(시크릿 모드 등)면 partial path 비활성화 → 풀-DB push로 자연 fallback.
+   */
+  const studentAuth = useMemo<
+    | {
+        spreadsheetId: string;
+        shareToken: string;
+        studentNo: string;
+        studentCode: string;
+      }
+    | null
+  >(() => {
+    if (typeof window === "undefined" || !token || !effectiveSheetId) return null;
+    try {
+      const raw = window.sessionStorage.getItem(`writing-app:studentAuth:${token}`);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as {
+        shareToken?: string;
+        studentNo?: string;
+        studentCode?: string;
+      };
+      if (
+        !parsed.shareToken ||
+        !parsed.studentNo ||
+        !parsed.studentCode ||
+        parsed.studentNo !== studentNo
+      ) {
+        return null;
+      }
+      return {
+        spreadsheetId: effectiveSheetId,
+        shareToken: parsed.shareToken,
+        studentNo: parsed.studentNo,
+        studentCode: parsed.studentCode,
+      };
+    } catch {
+      return null;
+    }
+  }, [token, studentNo, effectiveSheetId]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -269,17 +317,38 @@ export default function WritePage() {
     try { localStorage.setItem(TUTOR_H_KEY, String(tutorHeight)); } catch { /* ignore */ }
   }, [tutorHeight]);
 
+  /**
+   * 교사 코멘트·승인 등을 학생 화면으로 가져오기 위한 polling.
+   * - 10초 → 60초로 완화: 학생 30명 동시 접속 기준 read 호출량을 1/6로 줄여 quota 보호.
+   * - document.hidden일 때는 polling을 건너뛰어 백그라운드 탭에서 무의미한 호출을 차단.
+   * - 화면이 다시 보이는 시점에 즉시 1회 refresh해 실시간성을 일부 회복.
+   */
   useEffect(() => {
     if (!effectiveSheetId) return;
     setActiveSpreadsheetId(effectiveSheetId);
+    let cancelled = false;
     const tick = () => {
-      void mergeStudentViewFromRemote(effectiveSheetId).then(() =>
-        setDbBump((v) => v + 1),
-      );
+      if (cancelled) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      void mergeStudentViewFromRemote(effectiveSheetId).then(() => {
+        if (!cancelled) setDbBump((v) => v + 1);
+      });
     };
     tick();
-    const id = window.setInterval(tick, 10000);
-    return () => window.clearInterval(id);
+    const id = window.setInterval(tick, 60000);
+    const onVisible = () => {
+      if (typeof document !== "undefined" && !document.hidden) tick();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
+    }
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisible);
+      }
+    };
   }, [effectiveSheetId]);
 
   const onResizeWidthStart = useCallback(
@@ -412,35 +481,50 @@ export default function WritePage() {
     bumpDb();
   }
 
+  /**
+   * 키 입력 자동저장 — localStorage만 갱신하고 시트 push는 하지 않는다.
+   * 시트 push는 명시적 "저장하기/제출하기" 또는 단계 전환·GRASP 저장 등에서만 발생.
+   * 학생당 시트 read/write 호출량을 90% 이상 줄여 quota 폭주를 막는 핵심 변경.
+   */
   function persist(stage: Stage, text: string) {
     if (!state.ok) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      void (async () => {
-        if (!state.ok) return;
-        try {
-          const patch =
-            stage === "outline" ? { outlineText: text } :
-            stage === "draft" ? { draftText: text } :
-            { reviseText: text };
-          await updateSubmissionWithRemoteMerge(state.submission.id, patch, sheetSaveOpts);
-          bumpDb();
-        } catch { /* ignore */ }
-      })();
+      if (!state.ok) return;
+      try {
+        const patch =
+          stage === "outline" ? { outlineText: text } :
+          stage === "draft" ? { draftText: text } :
+          { reviseText: text };
+        updateSubmissionLocalOnly(state.submission.id, patch);
+        bumpDb();
+      } catch { /* ignore */ }
     }, 120);
   }
 
+  /**
+   * localStorage 갱신 후 시트 push가 실제로 끝날 때까지 대기. push 실패 시 throw하여
+   * 호출자가 "제출 완료" 모달을 띄우지 않도록 한다.
+   *
+   * studentAuth가 확보된 경우 partial endpoint를 사용 — 시트 페이로드가 학생 1명분으로
+   * 줄어 9초 timeout 위험 사실상 0. 인증 정보가 없으면(레거시 세션 등) 풀-DB push로 fallback.
+   */
   async function flushSaveToDb() {
     if (!state.ok) return;
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    await updateSubmissionWithRemoteMerge(
-      state.submission.id,
-      { outlineText, draftText, reviseText },
-      sheetSaveOpts,
-    );
+    const patch = { outlineText, draftText, reviseText };
+    if (studentAuth) {
+      updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
+      await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
+    } else {
+      updateSubmissionAndPushStudent(state.submission.id, patch, sheetSaveOpts);
+      if (effectiveSheetId) {
+        await flushPendingPush(effectiveSheetId);
+      }
+    }
     bumpDb();
   }
 
@@ -451,6 +535,13 @@ export default function WritePage() {
     try {
       await flushSaveToDb();
       setShowSaveSuccess(true);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setError(
+        msg.trim()
+          ? `저장에 실패했습니다: ${msg}. 잠시 후 다시 시도해주세요.`
+          : "저장에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -461,11 +552,12 @@ export default function WritePage() {
     if (!state.ok) return;
     setGraspData(grasp);
     setShowGraspForm(false);
-    await updateSubmissionWithRemoteMerge(
-      state.submission.id,
-      { graspData: JSON.stringify(grasp) },
-      sheetSaveOpts,
-    );
+    const patch = { graspData: JSON.stringify(grasp) };
+    if (studentAuth) {
+      updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
+    } else {
+      updateSubmissionAndPushStudent(state.submission.id, patch, sheetSaveOpts);
+    }
     bumpDb();
   }
 
@@ -554,19 +646,62 @@ export default function WritePage() {
       setShowGraspForm(true);
       return;
     }
-    await flushSaveToDb();
     setIsSubmitting(true);
     try {
-      const patch: Partial<Submission> =
-        stage === "outline"
-          ? { outlineSubmittedAt: Date.now(), outlineApprovedAt: null }
-          : stage === "draft"
-            ? { draftSubmittedAt: Date.now(), draftApprovedAt: null }
-            : { reviseSubmittedAt: Date.now(), reviseApprovedAt: null };
-      await updateSubmissionWithRemoteMerge(state.submission.id, patch, sheetSaveOpts);
+      // 자동저장 타이머가 떠 있으면 취소(아래에서 본문 + submit 시각을 한 번에 push)
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const submitAt = Date.now();
+      const patch: Partial<Submission> = (() => {
+        if (stage === "outline") {
+          return {
+            outlineText,
+            draftText,
+            reviseText,
+            outlineSubmittedAt: submitAt,
+            outlineApprovedAt: null,
+          };
+        }
+        if (stage === "draft") {
+          return {
+            outlineText,
+            draftText,
+            reviseText,
+            draftSubmittedAt: submitAt,
+            draftApprovedAt: null,
+          };
+        }
+        return {
+          outlineText,
+          draftText,
+          reviseText,
+          reviseSubmittedAt: submitAt,
+          reviseApprovedAt: null,
+        };
+      })();
+      // 본문 + 제출 시각을 단일 push에 묶고, 시트 반영이 끝날 때까지 대기.
+      // 실패 시 throw → "제출 완료" 모달이 뜨지 않으므로 데이터 손실 인지 가능.
+      if (studentAuth) {
+        updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
+        await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
+      } else {
+        updateSubmissionAndPushStudent(state.submission.id, patch, sheetSaveOpts);
+        if (effectiveSheetId) {
+          await flushPendingPush(effectiveSheetId);
+        }
+      }
       setStageEditUnlocked((prev) => ({ ...prev, [stage]: false }));
       bumpDb();
       setShowSubmitSuccess(true);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setError(
+        msg.trim()
+          ? `제출에 실패했습니다: ${msg}. 작성 내용은 기기에 저장되어 있으니 잠시 후 다시 시도해주세요.`
+          : "제출에 실패했습니다. 네트워크 상태를 확인하고 잠시 후 다시 시도해주세요. 작성 내용은 기기에 보관됩니다.",
+      );
     } finally {
       setIsSubmitting(false);
     }

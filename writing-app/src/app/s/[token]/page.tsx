@@ -11,8 +11,12 @@ import {
   mergeRemoteSharesIntoLocalDb,
   saveTeacherDb,
 } from "@/lib/localDb";
-import type { TeacherDb } from "@/lib/types";
-import { pullDbFromSheet, setActiveSpreadsheetId } from "@/lib/spreadsheetSync";
+import type { ClassRoom, TeacherDb } from "@/lib/types";
+import {
+  pullDbFromSheet,
+  pullDbFromSheetWithRetry,
+  setActiveSpreadsheetId,
+} from "@/lib/spreadsheetSync";
 
 /**
  * 교사가 방금 만든 공유 토큰이 시트에 반영되기 전에 학생이 접속하면 1회 pull로는
@@ -168,17 +172,28 @@ export default function ShareLandingPage() {
 
       const { share } = latestState;
       const effectiveSid = sidFromUrl || share.spreadsheetId || null;
+      let pullFailed = false;
       if (effectiveSid) {
         setActiveSpreadsheetId(effectiveSid);
-        const remote = (await pullDbFromSheet(effectiveSid)) as TeacherDb | null;
-        if (remote) {
-          // 학생 디바이스가 받은 원격 DB를 다시 푸시하지 않도록 skipRemotePush.
-          // shares는 머지하여 다른 토큰의 활성 정보를 잃지 않게 한다.
-          const merged = mergeRemoteSharesIntoLocalDb(loadTeacherDb(), remote);
-          saveTeacherDb(
-            { ...remote, shares: merged.shares },
-            { skipRemotePush: true },
-          );
+        try {
+          // 다수 동시 접속 시 1회 pull은 quota·timeout으로 실패할 수 있어 retry 사용.
+          // pull 실패 시 stale localStorage로 검증하면 일부 학생만 로그인 실패하는 증상이 발생.
+          const result = await pullDbFromSheetWithRetry(effectiveSid, {
+            attempts: 3,
+            delayMs: 800,
+          });
+          const remote = (result.db as TeacherDb | null) ?? null;
+          if (remote) {
+            const merged = mergeRemoteSharesIntoLocalDb(loadTeacherDb(), remote);
+            saveTeacherDb(
+              { ...remote, shares: merged.shares },
+              { skipRemotePush: true },
+            );
+          } else {
+            pullFailed = true;
+          }
+        } catch {
+          pullFailed = true;
         }
       }
 
@@ -197,16 +212,38 @@ export default function ShareLandingPage() {
       })();
 
       if (!latestState2) {
-        setError("공유 링크가 유효하지 않습니다.");
+        setError(
+          pullFailed
+            ? "서버가 일시적으로 바쁘거나 네트워크가 불안정합니다. 30초 후 다시 시도해주세요."
+            : "공유 링크가 유효하지 않습니다.",
+        );
         return;
       }
 
       const { db, allocation } = latestState2;
-      const cls = db.classes.find((c) => c.students.some((s) => s.studentNo === no)) || null;
-      const student =
-        cls?.students.find((s) => s.studentNo === no && s.studentCode === code) || null;
+      // 학번이 동일한 학생이 여러 학급에 등록된 경우, first-match 학급으로 잘못 매칭되어
+      // 학생 코드 검증에서 실패하던 문제를 해결하기 위해 (학번 AND 학생 코드)가 함께
+      // 일치하는 학급을 찾는다.
+      let cls: ClassRoom | null = null;
+      let student: ClassRoom["students"][number] | null = null;
+      for (const c of db.classes) {
+        const found = c.students.find(
+          (s) => s.studentNo === no && s.studentCode === code,
+        );
+        if (found) {
+          cls = c;
+          student = found;
+          break;
+        }
+      }
       if (!cls || !student) {
-        setError("학번 또는 학생 코드가 올바르지 않습니다.");
+        // 시트 pull이 실패해 stale local로 검증한 경우 진짜 mismatch가 아닐 수 있으므로
+        // 메시지를 분리한다.
+        setError(
+          pullFailed
+            ? "서버가 일시적으로 바빠 학생 정보를 가져오지 못했습니다. 잠시 후 다시 시도해주세요."
+            : "학번 또는 학생 코드가 올바르지 않습니다.",
+        );
         return;
       }
       if (!allocation) {
@@ -214,10 +251,12 @@ export default function ShareLandingPage() {
         return;
       }
 
+      const matchedClass = cls;
       const isAssigned =
-        allocation.targets.some((t) => t.type === "class" && t.classId === cls.id) ||
+        allocation.targets.some((t) => t.type === "class" && t.classId === matchedClass.id) ||
         allocation.targets.some(
-          (t) => t.type === "student" && t.classId === cls.id && t.studentNo === no,
+          (t) =>
+            t.type === "student" && t.classId === matchedClass.id && t.studentNo === no,
         );
       if (!isAssigned) {
         setError("이 과제가 본인에게 배당되지 않았습니다.");
@@ -227,6 +266,19 @@ export default function ShareLandingPage() {
       // 다음 단계에서 실제 작문 화면(/write/...)로 이동하도록 연결
       const sidForWrite = sidFromUrl || latestState2.share.spreadsheetId || "";
       const sidQ = sidForWrite ? `&sid=${encodeURIComponent(sidForWrite)}` : "";
+      // partial update endpoint는 학생 코드를 인증 정보로 사용한다. URL에 노출되면 공유 링크
+      // 자체가 코드까지 포함해 유출 위험이 있으므로 sessionStorage(같은 탭에만 유효)에 보관.
+      try {
+        const authPayload = JSON.stringify({
+          shareToken: token,
+          studentNo: no,
+          studentCode: code,
+          spreadsheetId: sidForWrite,
+        });
+        window.sessionStorage.setItem(`writing-app:studentAuth:${token}`, authPayload);
+      } catch {
+        /* sessionStorage 차단 환경(시크릿 모드 등)에서는 partial path 비활성화로 fallback */
+      }
       router.push(`/s/${token}/write?studentNo=${encodeURIComponent(no)}${sidQ}`);
     } finally {
       setIsVerifying(false);
