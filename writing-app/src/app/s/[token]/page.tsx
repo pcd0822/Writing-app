@@ -357,7 +357,11 @@ export default function ShareLandingPage() {
 
             {error ? <div className={styles.errorBox}>{error}</div> : null}
 
-            <Button onClick={onEnter} isLoading={isVerifying}>
+            <Button
+              onClick={onEnter}
+              isLoading={isVerifying}
+              loadingLabel="로그인 확인 중…"
+            >
               작문 시작
             </Button>
           </>

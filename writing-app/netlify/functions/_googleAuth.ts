@@ -26,23 +26,37 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive",
 ];
 
+/**
+ * Warm Lambda 한 인스턴스가 처리하는 동시 호출들이 같은 JWT 객체와 access token 을
+ * 공유하도록 module-level 에서 캐싱한다. googleapis 의 JWT 클라이언트는 내부적으로
+ * 토큰 만료 직전까지 access token 을 재사용하므로, 한 번만 만들어두면 30명이 동시에
+ * 들어와도 OAuth round-trip 이 1회로 줄어든다 (cold start 한정).
+ */
+let cachedJwt: InstanceType<typeof google.auth.JWT> | null = null;
+let cachedSheetsClient: ReturnType<typeof google.sheets> | null = null;
+let cachedDriveClient: ReturnType<typeof google.drive> | null = null;
+
 export function getGoogleJwt() {
+  if (cachedJwt) return cachedJwt;
   const { clientEmail, privateKey } = getServiceAccount();
-  return new google.auth.JWT({
+  cachedJwt = new google.auth.JWT({
     email: clientEmail,
     key: privateKey,
     scopes: SCOPES,
   });
+  return cachedJwt;
 }
 
 export function getSheetsClient() {
-  const auth = getGoogleJwt();
-  return google.sheets({ version: "v4", auth });
+  if (cachedSheetsClient) return cachedSheetsClient;
+  cachedSheetsClient = google.sheets({ version: "v4", auth: getGoogleJwt() });
+  return cachedSheetsClient;
 }
 
 export function getDriveClient() {
-  const auth = getGoogleJwt();
-  return google.drive({ version: "v3", auth });
+  if (cachedDriveClient) return cachedDriveClient;
+  cachedDriveClient = google.drive({ version: "v3", auth: getGoogleJwt() });
+  return cachedDriveClient;
 }
 
 export async function getGoogleAccessToken(): Promise<string> {
