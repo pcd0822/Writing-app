@@ -65,7 +65,10 @@ export async function readTeacherDbFromSpreadsheet(
 ): Promise<TeacherDb | null> {
   const sheets = getSheetsClient();
   const ranges = [
-    "meta!A1",
+    // meta는 단일 셀(50k자 한도)을 넘어 학급/과제/제출이 늘어나면 push가 통째로
+    // 실패하던 문제를 해결하기 위해 meta!A 컬럼 여러 행으로 청크 분할 저장한다.
+    // 읽을 때는 모든 행을 순서대로 이어붙여 단일 JSON 문자열로 복원.
+    "meta!A:A",
     "assignment_text!A:D",
     "submission_text!A:D",
     "feedback_text!A:D",
@@ -93,7 +96,10 @@ export async function readTeacherDbFromSpreadsheet(
   );
 
   const valueRanges = res.data.valueRanges || [];
-  const metaCell = valueRanges[0]?.values?.[0]?.[0] as string | undefined;
+  // meta!A 컬럼의 모든 행을 순서대로 이어붙여 단일 JSON 문자열로 복원.
+  // 옛 단일 셀 저장 방식과도 호환(행이 1개면 결과는 그 셀과 동일).
+  const metaRows = (valueRanges[0]?.values || []) as string[][];
+  const metaCell = metaRows.map((row) => String(row[0] ?? "")).join("") || undefined;
 
   const chunks = {
     assignmentText: (valueRanges[1]?.values || []) as string[][],
@@ -223,10 +229,18 @@ export async function writeTeacherDbToSpreadsheet(
   const slim = toSlimDbForMeta(validated);
   const metaPayload = wrapMetaPayload(slim);
   const metaStr = JSON.stringify(metaPayload);
-  if (metaStr.length > MAX_CELL_CHARS) {
-    throw new Error(
-      `메타 JSON이 너무 큽니다(${metaStr.length}자). 구조 데이터(반·과제·배당 등)를 줄이거나 관리자에게 문의하세요. (한도 ${MAX_CELL_CHARS}자)`,
-    );
+
+  // meta JSON을 단일 셀(50k자 한도) 대신 meta!A 컬럼의 여러 행에 청크로 저장.
+  // 학급·과제·제출이 늘어나도 push가 통째로 실패하지 않도록 한다(이전엔 한도 초과
+  // 시 throw → 코얼레싱 push 전체 실패 → 교사 승인이 시트에 도달하지 못해 학생
+  // 화면이 영영 다음 단계로 못 넘어가는 사고가 있었음).
+  const metaValues: string[][] = [];
+  if (metaStr.length === 0) {
+    metaValues.push([""]);
+  } else {
+    for (let i = 0; i < metaStr.length; i += MAX_CELL_CHARS) {
+      metaValues.push([metaStr.slice(i, i + MAX_CELL_CHARS)]);
+    }
   }
 
   const chunks = buildChunkSheetValues(validated);
@@ -235,7 +249,7 @@ export async function writeTeacherDbToSpreadsheet(
   const idMap = await getSheetIdMap(spreadsheetId);
 
   const sheetData: { title: string; values: string[][] }[] = [
-    { title: "meta", values: [[metaStr]] },
+    { title: "meta", values: metaValues },
     { title: "assignment_text", values: chunks.assignment_text },
     { title: "submission_text", values: chunks.submission_text },
     { title: "feedback_text", values: chunks.feedback_text },

@@ -154,12 +154,14 @@ export const handler: Handler = async (event) => {
       const res = await sheets.spreadsheets.values.batchGet(
         {
           spreadsheetId,
-          ranges: ["meta!A1", "assignments!A:C"],
+          // meta는 여러 행 청크로 저장되므로 컬럼 전체를 읽어 이어붙인다.
+          ranges: ["meta!A:A", "assignments!A:C"],
         },
         { timeout: 8000 },
       );
       const valueRanges = res.data.valueRanges || [];
-      const metaCell = (valueRanges[0]?.values?.[0]?.[0] as string | undefined) ?? "";
+      const metaRows = (valueRanges[0]?.values || []) as string[][];
+      const metaCell = metaRows.map((row) => String(row[0] ?? "")).join("");
       const assignmentRows = (valueRanges[1]?.values || []) as string[][];
 
       let metaSummary: {
