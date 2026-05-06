@@ -705,7 +705,7 @@ export default function TeacherAssignmentPage() {
                   <div className={styles.block}>
                     <div className={styles.blockTitle}>
                       현재 단계: {stageText(currentStage(selected.sub))}
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {(() => {
                           const tabStage = dashTab as Stage;
                           const tabApproved =
@@ -727,6 +727,11 @@ export default function TeacherAssignmentPage() {
                                     borderColor: "#86efac",
                                     color: "#166534",
                                     cursor: "default",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    lineHeight: 1,
+                                    boxSizing: "border-box",
                                   }}
                                   aria-disabled="true"
                                 >

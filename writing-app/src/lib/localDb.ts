@@ -661,7 +661,41 @@ function applyTombstones(db: TeacherDb): TeacherDb {
   };
 }
 
-export function mergeTeacherDbs(local: TeacherDb, remote: TeacherDb): TeacherDb {
+/**
+ * @param options.preferLocalTeacherFields true면 submission 머지 시 교사 전용 필드
+ *   (outline/draft/reviseApprovedAt, finalApprovedAt, finalReportPublishedAt,
+ *   finalReportSnapshot, *RejectReason)는 항상 local 값을 사용한다.
+ *
+ *   teacher push 직전 pre-pull-merge에서 학생의 동시 partial push가 시트에
+ *   먼저 도착해 sheet.updatedAt > teacher_local.updatedAt 가 되더라도, 교사가 방금 한
+ *   승인/거부가 단순 updatedAt 비교에 의해 사라지지 않도록 보호한다.
+ *
+ *   다중 교사 환경에서 다른 디바이스의 동시 승인/취소가 우리의 local 값으로 덮일
+ *   수 있지만, 그 케이스는 매우 드물고 정기적인 시트 sync로 자가 치유된다. 단일
+ *   교사 + 다수 학생 환경(주된 사용 패턴)에서는 이 옵션이 race를 사실상 제거한다.
+ */
+export function mergeTeacherDbs(
+  local: TeacherDb,
+  remote: TeacherDb,
+  options?: { preferLocalTeacherFields?: boolean },
+): TeacherDb {
+  const preferLocal = options?.preferLocalTeacherFields === true;
+  const submissionMerge = (l: Submission, r: Submission): Submission => {
+    const winner = l.updatedAt >= r.updatedAt ? l : r;
+    if (!preferLocal) return winner;
+    return {
+      ...winner,
+      outlineApprovedAt: l.outlineApprovedAt,
+      draftApprovedAt: l.draftApprovedAt,
+      reviseApprovedAt: l.reviseApprovedAt,
+      finalApprovedAt: l.finalApprovedAt,
+      finalReportPublishedAt: l.finalReportPublishedAt ?? null,
+      finalReportSnapshot: l.finalReportSnapshot ?? "",
+      outlineRejectReason: l.outlineRejectReason ?? "",
+      draftRejectReason: l.draftRejectReason ?? "",
+      reviseRejectReason: l.reviseRejectReason ?? "",
+    };
+  };
   const merged: TeacherDb = {
     version: local.version,
     classes: mergeClasses(local.classes, remote.classes),
@@ -669,9 +703,7 @@ export function mergeTeacherDbs(local: TeacherDb, remote: TeacherDb): TeacherDb 
     assignments: mergeById(local.assignments, remote.assignments),
     allocations: mergeAllocations(local.allocations, remote.allocations),
     shares: mergeShares(local.shares, remote.shares),
-    submissions: mergeById(local.submissions, remote.submissions, (l, r) =>
-      l.updatedAt >= r.updatedAt ? l : r,
-    ),
+    submissions: mergeById(local.submissions, remote.submissions, submissionMerge),
     feedbackNotes: mergeById(local.feedbackNotes, remote.feedbackNotes, (l, r) => {
       if (l.resolvedAt != null && r.resolvedAt == null) return l;
       if (r.resolvedAt != null && l.resolvedAt == null) return r;

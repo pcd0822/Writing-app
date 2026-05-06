@@ -477,6 +477,64 @@ export default function WritePage() {
   const canOpenDraft = state.ok && !!state.submission.outlineApprovedAt;
   const canOpenRevise = state.ok && !!state.submission.draftApprovedAt;
 
+  /**
+   * 잠긴 탭(승인 대기) 클릭 시 즉시 시트와 동기화해서 교사가 방금 승인했는지 확인.
+   * 60초 polling 주기를 기다리지 않고 학생이 능동적으로 확인할 수 있게 한다.
+   *
+   * 동기화 후 fresh DB에서 승인이 들어와 있으면 곧장 그 탭으로 이동.
+   * 승인이 아직 없으면 안내 메시지를 띄워 잠시 후 다시 시도하도록 한다.
+   */
+  const [tabSyncStage, setTabSyncStage] = useState<Stage | null>(null);
+  async function attemptOpenLockedTab(stage: Stage) {
+    if (!state.ok || tabSyncStage) return;
+    setError(null);
+    setTabSyncStage(stage);
+    try {
+      if (effectiveSheetId) {
+        await mergeStudentViewFromRemote(effectiveSheetId);
+      }
+      const fresh = loadTeacherDb();
+      const sub = fresh.submissions.find((s) => s.id === state.submission.id);
+      const unlocked =
+        stage === "draft"
+          ? !!sub?.outlineApprovedAt
+          : stage === "revise"
+            ? !!sub?.draftApprovedAt
+            : true;
+      if (unlocked) {
+        // dbBump을 먼저 올려 state.submission이 최신값으로 갱신되도록 한 뒤,
+        // 다음 마이크로태스크에서 setTab으로 즉시 진입(handleTabChange는 stale한
+        // canOpenDraft를 보므로 우회). stepTransition은 handleTabChange와 동일하게 기록.
+        bumpDb();
+        const fromStep = stageToStep(tab);
+        const toStep = stageToStep(stage);
+        addStepTransition(
+          {
+            id: nanoid(10),
+            submissionId: state.submission.id,
+            studentNo,
+            fromStep,
+            toStep,
+            timestamp: Date.now(),
+            reason: "initial_progress",
+          },
+          sheetSaveOpts,
+        );
+        setTab(stage);
+      } else {
+        setError(
+          stage === "draft"
+            ? "아직 교사가 개요를 승인하지 않았어요. 잠시 후 다시 시도해주세요."
+            : "아직 교사가 초고를 승인하지 않았어요. 잠시 후 다시 시도해주세요.",
+        );
+      }
+    } catch {
+      setError("동기화 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setTabSyncStage(null);
+    }
+  }
+
   useEffect(() => {
     if (!state.ok) return;
     setOutlineText(state.submission.outlineText || "");
@@ -1131,10 +1189,24 @@ export default function WritePage() {
                 tab === "draft" ? styles.tabActive : "",
                 !canOpenDraft ? styles.tabDisabled : "",
               ].join(" ")}
-              onClick={() => canOpenDraft && handleTabChange("draft")}
-              disabled={!canOpenDraft}
+              onClick={() =>
+                canOpenDraft
+                  ? handleTabChange("draft")
+                  : void attemptOpenLockedTab("draft")
+              }
+              disabled={tabSyncStage === "draft"}
+              title={
+                !canOpenDraft
+                  ? "클릭하면 교사 승인 여부를 즉시 확인합니다."
+                  : undefined
+              }
             >
-              초고 {!canOpenDraft ? "(승인 대기)" : ""}
+              초고{" "}
+              {tabSyncStage === "draft"
+                ? "(확인 중…)"
+                : !canOpenDraft
+                  ? "(승인 대기 · 클릭해 확인)"
+                  : ""}
             </button>
             <button
               className={[
@@ -1142,10 +1214,24 @@ export default function WritePage() {
                 tab === "revise" ? styles.tabActive : "",
                 !canOpenRevise ? styles.tabDisabled : "",
               ].join(" ")}
-              onClick={() => canOpenRevise && handleTabChange("revise")}
-              disabled={!canOpenRevise}
+              onClick={() =>
+                canOpenRevise
+                  ? handleTabChange("revise")
+                  : void attemptOpenLockedTab("revise")
+              }
+              disabled={tabSyncStage === "revise"}
+              title={
+                !canOpenRevise
+                  ? "클릭하면 교사 승인 여부를 즉시 확인합니다."
+                  : undefined
+              }
             >
-              고쳐쓰기 {!canOpenRevise ? "(승인 대기)" : ""}
+              고쳐쓰기{" "}
+              {tabSyncStage === "revise"
+                ? "(확인 중…)"
+                : !canOpenRevise
+                  ? "(승인 대기 · 클릭해 확인)"
+                  : ""}
             </button>
           </div>
 

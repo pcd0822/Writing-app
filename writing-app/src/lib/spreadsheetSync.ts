@@ -94,7 +94,13 @@ export async function pushDbToSheet(
       });
       if (remote.db) {
         const { mergeTeacherDbs } = await import("./localDb");
-        toPush = mergeTeacherDbs(toPush, remote.db as TeacherDb);
+        // teacher push 경로에서는 교사 전용 필드(승인 시각·거부 사유·최종 스냅샷)는
+        // 항상 local 우선. 학생 partial push가 시트에 먼저 도착해 sheet.updatedAt이
+        // teacher_local.updatedAt보다 커지더라도, 교사가 방금 한 승인/거부가
+        // 단순 updatedAt 비교에 의해 사라지지 않도록 보호한다.
+        toPush = mergeTeacherDbs(toPush, remote.db as TeacherDb, {
+          preferLocalTeacherFields: true,
+        });
       }
     } catch (err) {
       console.warn("[Writing app] pre-push pull failed; pushing local only:", err);
