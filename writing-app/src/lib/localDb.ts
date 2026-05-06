@@ -329,6 +329,35 @@ export function deleteAssignment(db: TeacherDb, assignmentId: string): TeacherDb
   };
 }
 
+/**
+ * 학생 제출물 삭제. tombstone(kind=submission) 추가 후 cascade로 관련 데이터 제거.
+ * 호출자(교사 페이지)가 풀-DB push로 시트에 정착시킨다.
+ */
+export function deleteSubmission(db: TeacherDb, submissionId: string): TeacherDb {
+  const tombstone: Tombstone = {
+    kind: "submission",
+    id: submissionId,
+    deletedAt: Date.now(),
+  };
+  return {
+    ...db,
+    submissions: db.submissions.filter((s) => s.id !== submissionId),
+    feedbackNotes: db.feedbackNotes.filter((n) => n.submissionId !== submissionId),
+    aiLogs: db.aiLogs.filter((l) => l.submissionId !== submissionId),
+    scores: db.scores.filter((s) => s.submissionId !== submissionId),
+    stepTransitions: db.stepTransitions.filter(
+      (t) => t.submissionId !== submissionId,
+    ),
+    aiInteractions: db.aiInteractions.filter(
+      (i) => i.submissionId !== submissionId,
+    ),
+    teacherComments: db.teacherComments.filter(
+      (c) => c.submissionId !== submissionId,
+    ),
+    tombstones: addTombstone(db.tombstones, tombstone),
+  };
+}
+
 export function setAllocation(
   db: TeacherDb,
   allocation: AssignmentAllocation,
@@ -566,7 +595,15 @@ function applyTombstones(db: TeacherDb): TeacherDb {
   const assignmentDeleted = new Set(
     tombs.filter((t) => t.kind === "assignment").map((t) => t.id),
   );
-  if (classDeleted.size === 0 && assignmentDeleted.size === 0) return db;
+  const submissionDeleted = new Set(
+    tombs.filter((t) => t.kind === "submission").map((t) => t.id),
+  );
+  if (
+    classDeleted.size === 0 &&
+    assignmentDeleted.size === 0 &&
+    submissionDeleted.size === 0
+  )
+    return db;
 
   const classes = db.classes.filter((c) => !classDeleted.has(c.id));
   const assignments = db.assignments.filter((a) => !assignmentDeleted.has(a.id));
@@ -581,13 +618,17 @@ function applyTombstones(db: TeacherDb): TeacherDb {
     db.submissions
       .filter(
         (s) =>
-          assignmentDeleted.has(s.assignmentId) || classDeleted.has(s.classId),
+          assignmentDeleted.has(s.assignmentId) ||
+          classDeleted.has(s.classId) ||
+          submissionDeleted.has(s.id),
       )
       .map((s) => s.id),
   );
   const submissions = db.submissions.filter(
     (s) =>
-      !assignmentDeleted.has(s.assignmentId) && !classDeleted.has(s.classId),
+      !assignmentDeleted.has(s.assignmentId) &&
+      !classDeleted.has(s.classId) &&
+      !submissionDeleted.has(s.id),
   );
   const feedbackNotes = db.feedbackNotes.filter(
     (n) => !removedSubmissionIds.has(n.submissionId),

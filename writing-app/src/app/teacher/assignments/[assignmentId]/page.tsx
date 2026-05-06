@@ -6,8 +6,10 @@ import styles from "./teacher-assignment.module.css";
 import {
   addFeedbackNote,
   addTeacherComment,
+  deleteSubmission,
   getGraspData,
   loadTeacherDb,
+  saveTeacherDb,
   updateSubmission,
   upsertScore,
 } from "@/lib/localDb";
@@ -297,6 +299,56 @@ export default function TeacherAssignmentPage() {
       finalReportPublishedAt: null,
       finalReportSnapshot: "",
     });
+    bump();
+  }
+
+  /**
+   * 단계 승인 취소. 학생이 승인 이후 글을 수정해서 재피드백·재승인이 필요할 때 사용.
+   * 후속 단계 승인이 이미 있으면 cascade로 함께 해제(논리 모순 방지).
+   *  - outline 취소: outline + draft + revise + final 승인 모두 해제
+   *  - draft 취소: draft + revise + final 해제
+   *  - revise 취소: revise + final 해제
+   * 승인을 취소해도 학생의 제출 시각·본문은 보존된다(다시 검토 가능).
+   */
+  function cancelStageApproval(subId: string, stage: Stage) {
+    setError(null);
+    const patch: Partial<Submission> = {};
+    if (stage === "outline") {
+      patch.outlineApprovedAt = null;
+      patch.draftApprovedAt = null;
+      patch.reviseApprovedAt = null;
+      patch.finalApprovedAt = null;
+      patch.finalReportPublishedAt = null;
+      patch.finalReportSnapshot = "";
+    } else if (stage === "draft") {
+      patch.draftApprovedAt = null;
+      patch.reviseApprovedAt = null;
+      patch.finalApprovedAt = null;
+      patch.finalReportPublishedAt = null;
+      patch.finalReportSnapshot = "";
+    } else {
+      patch.reviseApprovedAt = null;
+      patch.finalApprovedAt = null;
+      patch.finalReportPublishedAt = null;
+      patch.finalReportSnapshot = "";
+    }
+    updateSubmission(subId, patch);
+    bump();
+  }
+
+  function deleteSelectedSubmission() {
+    if (!selected) return;
+    setError(null);
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        `학생 ${selected.sub.studentNo}의 제출물을 삭제하시겠어요?\n작성 글·피드백·점수·AI 로그가 모두 삭제되며 복구할 수 없습니다.`,
+      );
+      if (!ok) return;
+    }
+    const db = loadTeacherDb();
+    const next = deleteSubmission(db, selected.sub.id);
+    saveTeacherDb(next);
+    setSelectedSubmissionId(null);
     bump();
   }
 
@@ -604,11 +656,27 @@ export default function TeacherAssignmentPage() {
           <div className={styles.panelTitle} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>학생 대시보드</span>
             {selected ? (
-              <button type="button" className={styles.smallBtn}
-                style={{ fontSize: 11 }}
-                onClick={() => setShowStudentDashboard(true)}>
-                사고 성장 대시보드
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className={styles.smallBtn}
+                  style={{ fontSize: 11 }}
+                  onClick={() => setShowStudentDashboard(true)}>
+                  사고 성장 대시보드
+                </button>
+                <button
+                  type="button"
+                  className={styles.smallBtn}
+                  style={{
+                    fontSize: 11,
+                    background: "#fef2f2",
+                    borderColor: "#fecaca",
+                    color: "#991b1b",
+                  }}
+                  onClick={deleteSelectedSubmission}
+                  title="이 학생의 제출물(글·피드백·점수·AI 로그)을 삭제합니다."
+                >
+                  🗑 제출물 삭제
+                </button>
+              </div>
             ) : null}
           </div>
           {!selected ? (
@@ -638,24 +706,89 @@ export default function TeacherAssignmentPage() {
                     <div className={styles.blockTitle}>
                       현재 단계: {stageText(currentStage(selected.sub))}
                       <div style={{ display: "flex", gap: 6 }}>
-                        <button type="button" className={styles.approveBtn} style={{ marginLeft: 10 }}
-                          disabled={dashTab !== currentStage(selected.sub)}
-                          onClick={() => approveStage(selected.sub.id, currentStage(selected.sub))}
-                          title={dashTab !== currentStage(selected.sub) ? "현재 단계에서만 승인할 수 있습니다." : undefined}>
-                          {dashTab === "outline" ? "개요 승인" : dashTab === "draft" ? "초고 승인" : "최종 승인"}
-                        </button>
-                        {/* 거부 버튼 */}
-                        {dashTab === currentStage(selected.sub) ? (
-                          <button type="button" className={styles.smallBtn}
-                            style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}
-                            onClick={() => openRejectModal(dashTab as Stage)}>
-                            거부
-                          </button>
-                        ) : null}
+                        {(() => {
+                          const tabStage = dashTab as Stage;
+                          const tabApproved =
+                            tabStage === "outline"
+                              ? !!selected.sub.outlineApprovedAt
+                              : tabStage === "draft"
+                                ? !!selected.sub.draftApprovedAt
+                                : !!selected.sub.reviseApprovedAt;
+                          const isCurrentTab = dashTab === currentStage(selected.sub);
+                          // 승인 완료된 단계: '승인완료' 표시 + '승인취소' 버튼
+                          if (tabApproved) {
+                            return (
+                              <>
+                                <span
+                                  className={styles.approveBtn}
+                                  style={{
+                                    marginLeft: 10,
+                                    background: "#dcfce7",
+                                    borderColor: "#86efac",
+                                    color: "#166534",
+                                    cursor: "default",
+                                  }}
+                                  aria-disabled="true"
+                                >
+                                  ✓ 승인완료
+                                </span>
+                                <button
+                                  type="button"
+                                  className={styles.smallBtn}
+                                  onClick={() =>
+                                    cancelStageApproval(selected.sub.id, tabStage)
+                                  }
+                                  title="학생이 글을 수정한 뒤 다시 피드백·승인할 수 있도록 승인을 취소합니다."
+                                >
+                                  승인취소
+                                </button>
+                              </>
+                            );
+                          }
+                          // 미승인: 승인/거부 버튼 (현재 단계에서만 활성)
+                          return (
+                            <>
+                              <button
+                                type="button"
+                                className={styles.approveBtn}
+                                style={{ marginLeft: 10 }}
+                                disabled={!isCurrentTab}
+                                onClick={() =>
+                                  approveStage(selected.sub.id, tabStage)
+                                }
+                                title={
+                                  !isCurrentTab
+                                    ? "현재 단계에서만 승인할 수 있습니다."
+                                    : undefined
+                                }
+                              >
+                                {dashTab === "outline"
+                                  ? "개요 승인"
+                                  : dashTab === "draft"
+                                    ? "초고 승인"
+                                    : "최종 승인"}
+                              </button>
+                              {isCurrentTab ? (
+                                <button
+                                  type="button"
+                                  className={styles.smallBtn}
+                                  style={{
+                                    background: "#fef2f2",
+                                    borderColor: "#fecaca",
+                                    color: "#991b1b",
+                                  }}
+                                  onClick={() => openRejectModal(tabStage)}
+                                >
+                                  거부
+                                </button>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                         {dashTab === "revise" && selected.sub.finalApprovedAt ? (
                           <button type="button" className={styles.smallBtn}
                             onClick={() => cancelFinalApproval(selected.sub.id)}>
-                            승인 취소
+                            최종 배포 취소
                           </button>
                         ) : null}
                       </div>

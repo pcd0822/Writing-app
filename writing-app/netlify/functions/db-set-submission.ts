@@ -106,24 +106,29 @@ export const handler: Handler = async (event) => {
       );
     }
 
-    // 3) 해당 submissionId가 차지하던 옛 행들의 위치 파악
+    // 3) 해당 submissionId가 차지하던 옛 행들의 위치 + 기존 교사 필드 회수
+    //
+    // 학생 partial push가 outlineApprovedAt/draftApprovedAt/reviseApprovedAt/
+    // finalApprovedAt/finalReportPublishedAt 등 교사 전용 필드를 학생 디바이스의
+    // 로컬 값(보통 null)으로 덮으면, 교사가 방금 한 승인이 시트에서 사라진다.
+    // → 시트의 기존 값을 읽어 학생이 보낸 submission에 머지한 뒤에야 시트에 쓴다.
     const lookupRes = await sheets.spreadsheets.values.batchGet(
       {
         spreadsheetId,
         ranges: [
-          "submission_text!A:A",
+          "submission_text!A:D",
           "extra_text!A:B",
-          "submissions!A:A",
+          "submissions!A:N",
         ],
       },
       RPC_OPTS,
     );
-    const submissionTextIds = (lookupRes.data.valueRanges?.[0]?.values || []) as string[][];
+    const submissionTextAll = (lookupRes.data.valueRanges?.[0]?.values || []) as string[][];
     const extraTextRows = (lookupRes.data.valueRanges?.[1]?.values || []) as string[][];
-    const submissionsIds = (lookupRes.data.valueRanges?.[2]?.values || []) as string[][];
+    const submissionsAll = (lookupRes.data.valueRanges?.[2]?.values || []) as string[][];
 
     const submissionTextRowsToClear: number[] = [];
-    submissionTextIds.forEach((row, idx) => {
+    submissionTextAll.forEach((row, idx) => {
       if ((row[0] ?? "") === submission.id) submissionTextRowsToClear.push(idx);
     });
 
@@ -140,9 +145,76 @@ export const handler: Handler = async (event) => {
       });
     }
 
-    const submissionsRowToReplace = submissionsIds.findIndex(
+    const submissionsRowToReplace = submissionsAll.findIndex(
       (row) => (row[0] ?? "") === submission.id,
     );
+
+    // 시트 기존 행에서 교사 전용 필드 회수
+    const numOrNull = (v: unknown): number | null => {
+      if (v == null || v === "") return null;
+      const n = parseInt(String(v), 10);
+      return Number.isFinite(n) ? n : null;
+    };
+    const existingTabularRow =
+      submissionsRowToReplace >= 0
+        ? (submissionsAll[submissionsRowToReplace] || [])
+        : [];
+    const sheetOutlineApprovedAt = numOrNull(existingTabularRow[9]);
+    const sheetDraftApprovedAt = numOrNull(existingTabularRow[10]);
+    const sheetReviseApprovedAt = numOrNull(existingTabularRow[11]);
+    const sheetFinalApprovedAt = numOrNull(existingTabularRow[12]);
+    const sheetFinalReportPublishedAt = numOrNull(existingTabularRow[13]);
+
+    // 청크의 state JSON에서 거부 사유·finalReportSnapshot 회수
+    const collectChunk = (field: string): string => {
+      const parts: { idx: number; text: string }[] = [];
+      submissionTextAll.forEach((row) => {
+        if ((row[0] ?? "") === submission.id && (row[1] ?? "") === field) {
+          const partIdx = parseInt(String(row[2] ?? "0"), 10);
+          parts.push({
+            idx: Number.isFinite(partIdx) ? partIdx : 0,
+            text: String(row[3] ?? ""),
+          });
+        }
+      });
+      parts.sort((a, b) => a.idx - b.idx);
+      return parts.map((x) => x.text).join("");
+    };
+    const existingStateText = collectChunk("state");
+    let sheetOutlineRejectReason = "";
+    let sheetDraftRejectReason = "";
+    let sheetReviseRejectReason = "";
+    if (existingStateText) {
+      try {
+        const st = JSON.parse(existingStateText) as Record<string, unknown>;
+        sheetOutlineRejectReason = String(st.outlineRejectReason ?? "");
+        sheetDraftRejectReason = String(st.draftRejectReason ?? "");
+        sheetReviseRejectReason = String(st.reviseRejectReason ?? "");
+      } catch {
+        /* 파싱 실패 시 빈값 사용 */
+      }
+    }
+    const existingFinalSnapshot = collectChunk("finalSnapshot");
+
+    // 시트 우선 머지된 submission — 학생이 보낸 본문·제출 시각·grasp는 그대로,
+    // 교사 전용 필드는 시트의 기존 값으로 덮는다. 시트에서 거부된 상태(승인=null,
+    // rejectReason 채움)는 학생이 재제출하기 전까지 보존되며, 학생 재제출은
+    // outlineSubmittedAt 등을 새로 채워 보내므로 정상 흐름과 충돌 없음.
+    const mergedSubmission = {
+      ...submission,
+      outlineApprovedAt: sheetOutlineApprovedAt,
+      draftApprovedAt: sheetDraftApprovedAt,
+      reviseApprovedAt: sheetReviseApprovedAt,
+      finalApprovedAt: sheetFinalApprovedAt,
+      finalReportPublishedAt: sheetFinalReportPublishedAt,
+      outlineRejectReason: sheetOutlineRejectReason,
+      draftRejectReason: sheetDraftRejectReason,
+      reviseRejectReason: sheetReviseRejectReason,
+      // 학생 디바이스에 finalReportSnapshot 가 비어있더라도 시트 기존 값을 보존
+      finalReportSnapshot: submission.finalReportSnapshot
+        ? submission.finalReportSnapshot
+        : existingFinalSnapshot,
+    };
 
     // 4) 새 청크 행 빌드
     const newSubmissionTextRows: string[][] = [];
@@ -162,11 +234,11 @@ export const handler: Handler = async (event) => {
         ]);
       });
     };
-    pushField("outline", submission.outlineText);
-    pushField("draft", submission.draftText);
-    pushField("revise", submission.reviseText);
-    pushField("finalSnapshot", submission.finalReportSnapshot ?? "");
-    pushField("state", buildSubmissionStateJson(submission));
+    pushField("outline", mergedSubmission.outlineText);
+    pushField("draft", mergedSubmission.draftText);
+    pushField("revise", mergedSubmission.reviseText);
+    pushField("finalSnapshot", mergedSubmission.finalReportSnapshot ?? "");
+    pushField("state", buildSubmissionStateJson(mergedSubmission));
 
     const newExtraRows: string[][] = [];
     if (graspData && graspData.length > 0) {
@@ -178,21 +250,21 @@ export const handler: Handler = async (event) => {
     }
 
     const newSubmissionsRow: string[] = [
-      submission.id,
-      submission.assignmentId,
-      submission.classId,
-      submission.studentNo,
-      String(submission.createdAt),
-      String(submission.updatedAt),
-      submission.outlineSubmittedAt != null ? String(submission.outlineSubmittedAt) : "",
-      submission.draftSubmittedAt != null ? String(submission.draftSubmittedAt) : "",
-      submission.reviseSubmittedAt != null ? String(submission.reviseSubmittedAt) : "",
-      submission.outlineApprovedAt != null ? String(submission.outlineApprovedAt) : "",
-      submission.draftApprovedAt != null ? String(submission.draftApprovedAt) : "",
-      submission.reviseApprovedAt != null ? String(submission.reviseApprovedAt) : "",
-      submission.finalApprovedAt != null ? String(submission.finalApprovedAt) : "",
-      submission.finalReportPublishedAt != null
-        ? String(submission.finalReportPublishedAt)
+      mergedSubmission.id,
+      mergedSubmission.assignmentId,
+      mergedSubmission.classId,
+      mergedSubmission.studentNo,
+      String(mergedSubmission.createdAt),
+      String(mergedSubmission.updatedAt),
+      mergedSubmission.outlineSubmittedAt != null ? String(mergedSubmission.outlineSubmittedAt) : "",
+      mergedSubmission.draftSubmittedAt != null ? String(mergedSubmission.draftSubmittedAt) : "",
+      mergedSubmission.reviseSubmittedAt != null ? String(mergedSubmission.reviseSubmittedAt) : "",
+      mergedSubmission.outlineApprovedAt != null ? String(mergedSubmission.outlineApprovedAt) : "",
+      mergedSubmission.draftApprovedAt != null ? String(mergedSubmission.draftApprovedAt) : "",
+      mergedSubmission.reviseApprovedAt != null ? String(mergedSubmission.reviseApprovedAt) : "",
+      mergedSubmission.finalApprovedAt != null ? String(mergedSubmission.finalApprovedAt) : "",
+      mergedSubmission.finalReportPublishedAt != null
+        ? String(mergedSubmission.finalReportPublishedAt)
         : "",
     ];
 

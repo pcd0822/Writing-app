@@ -210,7 +210,7 @@ export type Score = z.infer<typeof ScoreSchema>;
 // union 머지 모델에서 한쪽 디바이스의 삭제가 다른 디바이스의 stale 로컬에 의해
 // 부활하지 않도록, 삭제 시점에 tombstone을 남겨 다음 머지에서 해당 id를 결과
 // 집합에서 제거한다. tombstone 자체는 union 머지로 모든 디바이스에 전파된다.
-export const TombstoneKindSchema = z.enum(["class", "assignment"]);
+export const TombstoneKindSchema = z.enum(["class", "assignment", "submission"]);
 export type TombstoneKind = z.infer<typeof TombstoneKindSchema>;
 
 export const TombstoneSchema = z.object({
