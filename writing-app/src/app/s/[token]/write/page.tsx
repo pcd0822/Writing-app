@@ -980,7 +980,7 @@ export default function WritePage() {
       <Modal isOpen={showSaveSuccess} onClose={() => setShowSaveSuccess(false)} title="저장 완료" description="작성 내용이 저장되었습니다." size="lg"
         footer={<Button variant="secondary" onClick={() => setShowSaveSuccess(false)}>확인</Button>}>
         <div style={{ fontSize: 14, lineHeight: 1.55, color: "#0f172a" }}>
-          저장이 완료되었습니다! 구글 스프레드시트에 연결된 경우 잠시 후 시트에도 반영됩니다.
+          작성 내용이 서버에 안전하게 저장되었습니다.
         </div>
       </Modal>
 
@@ -988,7 +988,7 @@ export default function WritePage() {
         isOpen={recoveryNotice?.kind === "uploaded"}
         onClose={() => setRecoveryNotice(null)}
         title="이전 작업이 자동 저장되었습니다"
-        description="이 디바이스에 남아 있던 이전 작성 내용을 구글 스프레드시트에 자동으로 동기화했어요."
+        description="이 디바이스에 남아 있던 이전 작성 내용을 서버에 자동으로 저장했어요."
         size="lg"
         footer={
           <Button variant="secondary" onClick={() => setRecoveryNotice(null)}>
@@ -997,8 +997,8 @@ export default function WritePage() {
         }
       >
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "#0f172a" }}>
-          이전에 작성하신 내용이 구글 스프레드시트에 저장되지 않은 상태였는데,
-          접속과 동시에 자동으로 동기화되었습니다. 계속 작성하셔도 됩니다.
+          이전에 작성하신 내용이 서버에 저장되지 않은 상태였는데, 접속과 동시에 자동으로
+          저장되었습니다. 계속 작성하셔도 됩니다.
         </div>
       </Modal>
 
@@ -1006,7 +1006,7 @@ export default function WritePage() {
         isOpen={recoveryNotice?.kind === "downloaded"}
         onClose={() => setRecoveryNotice(null)}
         title="다른 디바이스의 작성 내용을 불러왔습니다"
-        description="다른 디바이스에서 마지막으로 작성·저장한 내용을 구글 스프레드시트에서 가져왔습니다."
+        description="다른 디바이스에서 마지막으로 작성·저장한 내용을 서버에서 가져왔습니다."
         size="lg"
         footer={
           <Button variant="secondary" onClick={() => setRecoveryNotice(null)}>
@@ -1252,6 +1252,24 @@ export default function WritePage() {
               {!approvedNow ? (
                 <button
                   type="button"
+                  className={styles.stepBtnSecondary}
+                  disabled={isSaving || locked}
+                  data-loading={isSaving ? "true" : undefined}
+                  onClick={() => void onSaveClick()}
+                >
+                  {isSaving ? (
+                    <span className={styles.btnInline}>
+                      <span className={styles.btnSpinner} aria-hidden="true" />
+                      <span>저장 중…</span>
+                    </span>
+                  ) : (
+                    "저장하기"
+                  )}
+                </button>
+              ) : null}
+              {!approvedNow ? (
+                <button
+                  type="button"
                   className={styles.stepBtnPrimary}
                   disabled={submitDisabled}
                   data-loading={isSubmitting ? "true" : undefined}
@@ -1435,10 +1453,6 @@ export default function WritePage() {
             ) : null}
 
             {error ? <div className={styles.error}>{error}</div> : null}
-
-            <Button onClick={() => void onSaveClick()} isLoading={isSaving} variant="secondary">
-              저장하기
-            </Button>
           </div>
         </div>
 

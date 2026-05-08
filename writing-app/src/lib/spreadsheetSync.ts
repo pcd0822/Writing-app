@@ -435,6 +435,35 @@ export async function pullDbForShareViewWithRetry(
   return last;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Hard-delete helpers (Supabase mode only).
+//
+// `saveTeacherDb` -> `supabase-db-set` only upserts. To actually remove a
+// class/assignment/submission/shareLink from Supabase, the caller has to
+// hit the dedicated `supabase-delete` endpoint here. On the sheet path
+// this is a no-op — the tombstones the client adds locally will travel
+// along with the next `pushDbToSheet` and cascade-delete in the sheet,
+// matching the original behaviour.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type RemoteEntityKind = "class" | "assignment" | "submission" | "shareLink";
+
+export async function deleteRemoteEntity(
+  kind: RemoteEntityKind,
+  id: string,
+): Promise<void> {
+  if (!USE_SUPABASE) return;
+  const token = await getCurrentTeacherIdToken();
+  if (!token) {
+    throw new Error("교사 로그인이 필요합니다. 다시 로그인 후 시도해주세요.");
+  }
+  await callFunction<{ ok: true; deletedCount: number }>(
+    "supabase-delete",
+    { kind, id },
+    { authToken: token, retries: 0 },
+  );
+}
+
 /**
  * 진행 중이거나 대기 중인 push를 즉시 끝낸 뒤 resolve. 공유 링크 생성처럼
  * "원격에 반드시 반영된 다음에 다음 단계로 가야 하는" 흐름에서 사용.

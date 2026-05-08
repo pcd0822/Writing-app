@@ -13,6 +13,7 @@ import {
   updateSubmission,
   upsertScore,
 } from "@/lib/localDb";
+import { deleteRemoteEntity } from "@/lib/spreadsheetSync";
 import { nanoid } from "nanoid";
 import type {
   AiInteraction,
@@ -336,7 +337,7 @@ export default function TeacherAssignmentPage() {
     bump();
   }
 
-  function deleteSelectedSubmission() {
+  async function deleteSelectedSubmission() {
     if (!selected) return;
     setError(null);
     if (typeof window !== "undefined") {
@@ -346,6 +347,14 @@ export default function TeacherAssignmentPage() {
       if (!ok) return;
     }
     const db = loadTeacherDb();
+    try {
+      // Supabase 모드: row hard delete. saveTeacherDb의 supabase-db-set은
+      // upsert만 하므로 이 호출이 없으면 다음 pull에서 다시 나타남.
+      await deleteRemoteEntity("submission", selected.sub.id);
+    } catch (e) {
+      setError((e as Error).message || "원격 삭제에 실패했습니다.");
+      return;
+    }
     const next = deleteSubmission(db, selected.sub.id);
     saveTeacherDb(next);
     setSelectedSubmissionId(null);
@@ -818,9 +827,17 @@ export default function TeacherAssignmentPage() {
                       const paragraphs = text.trim() ? text.trim().split(/\n+/).length : 0;
                       return (
                         <div className={styles.statsBar}>
-                          <span>글자수(공백포함): <b>{charsWithSpaces}</b></span>
-                          <span>글자수(공백제외): <b>{charsNoSpaces}</b></span>
-                          <span>문단: <b>{paragraphs}</b></span>
+                          {/* 한 묶음으로 표시해 두 숫자가 다른 통계처럼 합산되어
+                              보이지 않게 함. 공백 제외값은 부속 표기. */}
+                          <span>
+                            글자수: <b>{charsWithSpaces}</b>자
+                            <span style={{ opacity: 0.7, marginLeft: 6 }}>
+                              (공백 제외 <b>{charsNoSpaces}</b>자)
+                            </span>
+                          </span>
+                          <span>
+                            문단: <b>{paragraphs}</b>개
+                          </span>
                         </div>
                       );
                     })()}

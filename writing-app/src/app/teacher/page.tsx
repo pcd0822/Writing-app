@@ -13,6 +13,7 @@ import {
   saveTeacherDb,
 } from "@/lib/localDb";
 import {
+  deleteRemoteEntity,
   flushPendingPush,
   pullDbFromSheetWithRetry,
   pushDbToSheet,
@@ -356,6 +357,14 @@ export default function TeacherPage() {
           console.warn("[Writing app] delete pre-pull failed:", e);
         }
       }
+
+      // Supabase 모드: row 자체를 hard delete. saveTeacherDb는 upsert만 하므로
+      // 이 호출이 없으면 다음 mount에서 supabase pull로 다시 보임. 시트 모드면
+      // deleteRemoteEntity는 no-op이고 아래 pushDbToSheet의 tombstone 흐름이 처리.
+      await deleteRemoteEntity(
+        deleteTarget.kind === "class" ? "class" : "assignment",
+        deleteTarget.id,
+      );
 
       const next =
         deleteTarget.kind === "class"

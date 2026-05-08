@@ -104,19 +104,25 @@ export default function ShareLandingPage() {
     }
 
     async function resolve() {
-      // 1) 로컬 DB로 먼저 시도 (교사 본인 디바이스 fast-path)
-      const local = validateFromLocal();
-      if (local && local.ok) {
-        if (!cancelled) setShareState(local);
-        return;
-      }
-      if (local && !local.ok && local.reason !== "notfound") {
-        if (!cancelled) setShareState(local);
-        return;
+      // 1) 시트 모드는 교사 본인 디바이스 fast-path (localStorage가 truth source인
+      //    레거시 흐름)를 유지한다. supabase 모드는 origin이 Supabase뿐이므로
+      //    이 fast-path 자체를 건너뛰고 무조건 원격 pull로 확인한다 — 다른
+      //    디바이스에서 삭제된 share가 stale local 때문에 부활해 보이는 사고를
+      //    원천 차단.
+      if (!isUsingSupabase) {
+        const local = validateFromLocal();
+        if (local && local.ok) {
+          if (!cancelled) setShareState(local);
+          return;
+        }
+        if (local && !local.ok && local.reason !== "notfound") {
+          if (!cancelled) setShareState(local);
+          return;
+        }
       }
 
-      // 2) 로컬에 없으면 원격 동기화 후 재검증. supabase 모드면 sid 없이도
-      //    share-bootstrap endpoint로 fetch 가능. 시트 모드는 URL의 sid 필수.
+      // 2) 원격 동기화 후 재검증. supabase 모드면 sid 없이도 share-bootstrap
+      //    endpoint로 fetch 가능. 시트 모드는 URL의 sid 필수.
       const sidFromUrl =
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search).get("sid")
