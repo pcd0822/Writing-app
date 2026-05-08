@@ -21,6 +21,8 @@ import {
 import type { TeacherDb } from "@/lib/types";
 import styles from "./teacher.module.css";
 import { SpreadsheetSetupModal } from "@/components/teacher/SpreadsheetSetupModal";
+import { MigrateToSupabaseModal } from "@/components/teacher/MigrateToSupabaseModal";
+import { BackupToSheetModal } from "@/components/teacher/BackupToSheetModal";
 import { DriveSetupModal } from "@/components/teacher/DriveSetupModal";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
 import { CreateAssignmentModal } from "@/components/teacher/CreateAssignmentModal";
@@ -39,6 +41,8 @@ export default function TeacherPage() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isCreateClassOpen, setIsCreateClassOpen] = useState(false);
   const [isSheetSetupOpen, setIsSheetSetupOpen] = useState(false);
+  const [isMigrateOpen, setIsMigrateOpen] = useState(false);
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isDriveSetupOpen, setIsDriveSetupOpen] = useState(false);
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [shareAssignmentId, setShareAssignmentId] = useState<string | null>(null);
@@ -512,6 +516,24 @@ export default function TeacherPage() {
                 {isSyncing ? "동기화 중…" : "🔄 시트에서 동기화"}
               </button>
             ) : null}
+            {sheetId ? (
+              <button
+                className={styles.tinyButton}
+                onClick={() => setIsMigrateOpen(true)}
+                title="현재 시트의 모든 데이터를 Supabase 데이터베이스로 복사합니다 (idempotent)"
+              >
+                🚚 Supabase로 이전
+              </button>
+            ) : null}
+            {sheetId ? (
+              <button
+                className={styles.tinyButton}
+                onClick={() => setIsBackupOpen(true)}
+                title="Supabase의 현재 데이터를 시트로 덤프해 백업합니다"
+              >
+                📥 시트로 백업
+              </button>
+            ) : null}
             <button
               className={styles.tinyButton}
               onClick={() => setIsDriveSetupOpen(true)}
@@ -711,6 +733,16 @@ export default function TeacherPage() {
         isOpen={isSheetSetupOpen}
         onClose={() => setIsSheetSetupOpen(false)}
         onSaved={refreshDb}
+      />
+      <MigrateToSupabaseModal
+        isOpen={isMigrateOpen}
+        onClose={() => setIsMigrateOpen(false)}
+        spreadsheetId={sheetId}
+      />
+      <BackupToSheetModal
+        isOpen={isBackupOpen}
+        onClose={() => setIsBackupOpen(false)}
+        spreadsheetId={sheetId}
       />
       <DriveSetupModal
         isOpen={isDriveSetupOpen}

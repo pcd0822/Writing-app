@@ -16,8 +16,9 @@ import {
 } from "@/lib/localDb";
 import type { ClassRoom, TeacherDb } from "@/lib/types";
 import {
-  pullDbFromSheet,
-  pullDbFromSheetWithRetry,
+  isUsingSupabase,
+  pullDbForShareView,
+  pullDbForShareViewWithRetry,
   setActiveSpreadsheetId,
 } from "@/lib/spreadsheetSync";
 
@@ -27,17 +28,29 @@ import {
  * 토큰이 들어 있으면 즉시 종료해서 사용자 경험은 빠르게 유지한다.
  */
 async function pullSharedDbWithRetry(
-  spreadsheetId: string,
+  spreadsheetId: string | null,
   token: string,
   isCancelled: () => boolean,
 ): Promise<TeacherDb | null> {
+  // Supabase 모드: share-bootstrap이 token을 권위 있게 검증하므로 retry 불필요.
+  if (isUsingSupabase) {
+    if (isCancelled()) return null;
+    return (await pullDbForShareView({
+      shareToken: token,
+      spreadsheetId: null,
+    })) as TeacherDb | null;
+  }
+  // 시트 모드: 교사 push가 propagate되기를 짧게 기다려 가며 token 등장을 본다.
   const delays = [0, 800, 2000];
   for (let i = 0; i < delays.length; i++) {
     if (isCancelled()) return null;
     if (delays[i]) await new Promise((r) => setTimeout(r, delays[i]));
     if (isCancelled()) return null;
     try {
-      const remote = (await pullDbFromSheet(spreadsheetId)) as TeacherDb | null;
+      const remote = (await pullDbForShareView({
+        shareToken: token,
+        spreadsheetId,
+      })) as TeacherDb | null;
       if (!remote) continue;
       const hasToken = remote.shares?.some((s) => s.token === token);
       if (hasToken || i === delays.length - 1) return remote;
@@ -102,15 +115,15 @@ export default function ShareLandingPage() {
         return;
       }
 
-      // 2) 로컬에 없으면 URL의 sid로 원격 시트 동기화 후 재검증.
-      //    교사 푸시가 아직 끝나지 않았을 수 있어 짧은 백오프로 재시도한다.
+      // 2) 로컬에 없으면 원격 동기화 후 재검증. supabase 모드면 sid 없이도
+      //    share-bootstrap endpoint로 fetch 가능. 시트 모드는 URL의 sid 필수.
       const sidFromUrl =
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search).get("sid")
           : null;
-      if (sidFromUrl && token) {
+      if (token && (isUsingSupabase || sidFromUrl)) {
         try {
-          setActiveSpreadsheetId(sidFromUrl);
+          if (sidFromUrl) setActiveSpreadsheetId(sidFromUrl);
           const remote = await pullSharedDbWithRetry(sidFromUrl, token, () => cancelled);
           if (cancelled) return;
           if (remote) {
@@ -177,23 +190,29 @@ export default function ShareLandingPage() {
 
       // 시트 미연동 + 다른 학생 진입 = 격리 보장 불가. 안내 후 차단.
       // 같은 학생이면 localStorage 기반 단일 디바이스 모드로 그대로 진행.
-      if (!sameAsLast && !effectiveSid) {
+      // supabase 모드에서는 시트 연동 여부와 무관하게 share-bootstrap이 격리 보장.
+      if (!sameAsLast && !effectiveSid && !isUsingSupabase) {
         setError(
           "다른 학생이 같은 디바이스를 사용하려면 교사가 구글 스프레드시트 연동을 활성화해야 합니다.",
         );
         return;
       }
 
-      // 시트 pull (retry). effectiveSid가 있을 때만.
+      // 원격 pull (retry). supabase 모드면 sid 없어도 호출.
       let pullFailed = false;
       let remote: TeacherDb | null = null;
-      if (effectiveSid) {
-        setActiveSpreadsheetId(effectiveSid);
+      if (effectiveSid || isUsingSupabase) {
+        if (effectiveSid) setActiveSpreadsheetId(effectiveSid);
         try {
-          const result = await pullDbFromSheetWithRetry(effectiveSid, {
-            attempts: 3,
-            delayMs: 800,
-          });
+          const result = await pullDbForShareViewWithRetry(
+            {
+              shareToken: token!,
+              spreadsheetId: effectiveSid,
+              studentNo: no,
+              studentCode: code,
+            },
+            { attempts: 3, delayMs: 800 },
+          );
           remote = (result.db as TeacherDb | null) ?? null;
           if (!remote) pullFailed = true;
         } catch {

@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.105.3",
     "firebase": "^12.11.0",
     "googleapis": "^171.4.0",
     "html2canvas": "^1.4.1",
+    "jose": "^6.2.3",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "nanoid": "^5.1.7",

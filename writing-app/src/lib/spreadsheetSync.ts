@@ -1,6 +1,31 @@
 import { prepareDbForSheetPush } from "./attachments";
+import { getCurrentTeacherIdToken } from "./auth";
 import { callFunction } from "./netlifyClient";
 import type { Submission, TeacherDb } from "./types";
+
+// ─────────────────────────────────────────────────────────────────────────
+// Storage backend feature flag.
+//
+// NEXT_PUBLIC_USE_SUPABASE=true routes teacher pull/push and student partial
+// push to the Supabase-backed Functions. The function-name and request body
+// are the only things that change — coalescing, retry/backoff and the
+// pre-push pull-merge protection all stay identical so a backend swap can't
+// regress any of those guards.
+//
+// Teacher endpoints additionally attach Authorization: Bearer <Firebase ID
+// token>. The student partial endpoint stays unauthenticated; the server
+// re-verifies (shareToken, studentNo, studentCode) against Supabase rows.
+// ─────────────────────────────────────────────────────────────────────────
+
+const USE_SUPABASE = process.env.NEXT_PUBLIC_USE_SUPABASE === "true";
+
+async function teacherAuthOptions(): Promise<{ authToken: string }> {
+  const token = await getCurrentTeacherIdToken();
+  if (!token) {
+    throw new Error("교사 로그인이 필요합니다. 다시 로그인 후 시도해주세요.");
+  }
+  return { authToken: token };
+}
 
 const ACTIVE_SID_KEY = "writing-app:activeSpreadsheetId";
 
@@ -31,11 +56,20 @@ export type PullResult = {
 };
 
 export async function pullDbFromSheet(spreadsheetId: string): Promise<unknown | null> {
+  if (USE_SUPABASE) {
+    const opts = await teacherAuthOptions();
+    const res = await callFunction<PullResult>("supabase-db-get", {}, opts);
+    return res.db;
+  }
   const res = await callFunction<PullResult>("db-get", { spreadsheetId });
   return res.db;
 }
 
 export async function pullDbFromSheetWithDiag(spreadsheetId: string): Promise<PullResult> {
+  if (USE_SUPABASE) {
+    const opts = await teacherAuthOptions();
+    return await callFunction<PullResult>("supabase-db-get", {}, opts);
+  }
   return await callFunction<PullResult>("db-get", { spreadsheetId });
 }
 
@@ -58,11 +92,16 @@ export async function pullDbFromSheetWithRetry(
 ): Promise<PullResult> {
   const attempts = options?.attempts ?? 3;
   const delayMs = options?.delayMs ?? 900;
+  // 한 호출 단위에서는 토큰을 한 번만 가져온다 — 시도마다 getIdToken을 부르면
+  // 같은 캐시된 토큰이라도 SDK 내부 동기화 비용이 발생.
+  const supaOpts = USE_SUPABASE ? await teacherAuthOptions() : null;
   let last: PullResult = { db: null };
   for (let i = 0; i < attempts; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, delayMs * i));
     options?.onAttempt?.(i + 1, attempts);
-    last = await callFunction<PullResult>("db-get", { spreadsheetId });
+    last = supaOpts
+      ? await callFunction<PullResult>("supabase-db-get", {}, supaOpts)
+      : await callFunction<PullResult>("db-get", { spreadsheetId });
     if (last.db) return last;
   }
   return last;
@@ -107,7 +146,12 @@ export async function pushDbToSheet(
     }
   }
   const payload = prepareDbForSheetPush(toPush);
-  await callFunction<{ ok: true }>("db-set", { spreadsheetId, db: payload });
+  if (USE_SUPABASE) {
+    const opts = await teacherAuthOptions();
+    await callFunction<{ ok: true }>("supabase-db-set", { db: payload }, opts);
+  } else {
+    await callFunction<{ ok: true }>("db-set", { spreadsheetId, db: payload });
+  }
   return toPush;
 }
 
@@ -228,7 +272,11 @@ export type PushSubmissionPartialPayload = {
 export async function pushSubmissionPartial(
   payload: PushSubmissionPartialPayload,
 ): Promise<void> {
-  await callFunction<{ ok: true }>("db-set-submission", payload);
+  // The Supabase student endpoint ignores spreadsheetId — it resolves the
+  // teacher and class via shareToken + students rows directly. Sending the
+  // same payload either way keeps the call sites untouched.
+  const fn = USE_SUPABASE ? "supabase-db-set-submission" : "db-set-submission";
+  await callFunction<{ ok: true }>(fn, payload);
 }
 
 /**
@@ -307,6 +355,84 @@ export async function flushPendingPartialPush(
     // 진행 중인 push가 있으면 그 결과를 그대로 전파(reject 시 호출자도 throw).
     if (inflight) await inflight;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Student share-view fetch (Supabase-mode aware).
+//
+// On the sheet path, both the share landing and the student write page
+// call `pullDbFromSheet(spreadsheetId)`. Under USE_SUPABASE that helper
+// would try the teacher endpoint and 401 — students don't carry a Firebase
+// token. The two helpers below take a shareToken (and optionally
+// studentNo/studentCode) and route to the dedicated student endpoint
+// `supabase-share-bootstrap`, which validates the token, narrows the DB
+// to that share's assignment, and blanks every other student's body text.
+//
+// The sheet-mode branch falls back to the original `db-get` wholesale
+// pull, preserving the retry behaviour the landing page relies on for
+// teacher-pushed-then-immediately-shared timing.
+// ─────────────────────────────────────────────────────────────────────────
+
+export const isUsingSupabase = USE_SUPABASE;
+
+export type ShareViewPullArgs = {
+  shareToken: string;
+  /** 시트 모드 fallback. supabase 모드에서는 무시됨. */
+  spreadsheetId: string | null;
+  /** 학번/코드 입력 후 호출이면 함께 보내 자기 submission 본문을 받음. */
+  studentNo?: string;
+  studentCode?: string;
+};
+
+export async function pullDbForShareView(
+  args: ShareViewPullArgs,
+): Promise<unknown | null> {
+  if (USE_SUPABASE) {
+    const res = await callFunction<{ db: unknown | null }>(
+      "supabase-share-bootstrap",
+      {
+        shareToken: args.shareToken,
+        studentNo: args.studentNo,
+        studentCode: args.studentCode,
+      },
+    );
+    return res.db;
+  }
+  if (!args.spreadsheetId) return null;
+  const res = await callFunction<PullResult>("db-get", {
+    spreadsheetId: args.spreadsheetId,
+  });
+  return res.db;
+}
+
+export async function pullDbForShareViewWithRetry(
+  args: ShareViewPullArgs,
+  options?: {
+    attempts?: number;
+    delayMs?: number;
+    onAttempt?: (attempt: number, total: number) => void;
+  },
+): Promise<PullResult> {
+  if (USE_SUPABASE) {
+    // supabase-share-bootstrap is single-source-of-truth — a successful
+    // call already returns the freshest data. No propagation lag to retry
+    // through.
+    const db = await pullDbForShareView(args);
+    return { db };
+  }
+  if (!args.spreadsheetId) return { db: null };
+  const attempts = options?.attempts ?? 3;
+  const delayMs = options?.delayMs ?? 900;
+  let last: PullResult = { db: null };
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delayMs * i));
+    options?.onAttempt?.(i + 1, attempts);
+    last = await callFunction<PullResult>("db-get", {
+      spreadsheetId: args.spreadsheetId,
+    });
+    if (last.db) return last;
+  }
+  return last;
 }
 
 /**

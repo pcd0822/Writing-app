@@ -50,7 +50,8 @@ import { parseFinalReportSnapshot, type FinalReportSnapshotV1 } from "@/lib/fina
 import {
   flushPendingPartialPush,
   flushPendingPush,
-  pullDbFromSheet,
+  isUsingSupabase,
+  pullDbForShareView,
   setActiveSpreadsheetId,
 } from "@/lib/spreadsheetSync";
 
@@ -267,7 +268,10 @@ export default function WritePage() {
       }
     | null
   >(() => {
-    if (typeof window === "undefined" || !token || !effectiveSheetId) return null;
+    // supabase 모드는 spreadsheetId가 없어도 partial push가 동작 (서버가 무시).
+    // 시트 모드는 sid가 학생 partial push의 라우팅 키라 필수.
+    if (typeof window === "undefined" || !token) return null;
+    if (!effectiveSheetId && !isUsingSupabase) return null;
     try {
       const raw = window.sessionStorage.getItem(`writing-app:studentAuth:${token}`);
       if (!raw) return null;
@@ -285,7 +289,8 @@ export default function WritePage() {
         return null;
       }
       return {
-        spreadsheetId: effectiveSheetId,
+        // supabase 모드에서 sid가 없으면 빈 string. partial endpoint가 무시함.
+        spreadsheetId: effectiveSheetId ?? "",
         shareToken: parsed.shareToken,
         studentNo: parsed.studentNo,
         studentCode: parsed.studentCode,
@@ -353,9 +358,12 @@ export default function WritePage() {
 
     void (async () => {
       try {
-        const remote = (await pullDbFromSheet(studentAuth.spreadsheetId)) as
-          | TeacherDb
-          | null;
+        const remote = (await pullDbForShareView({
+          shareToken: studentAuth.shareToken,
+          spreadsheetId: studentAuth.spreadsheetId || null,
+          studentNo: studentAuth.studentNo,
+          studentCode: studentAuth.studentCode,
+        })) as TeacherDb | null;
         if (!remote) return;
         const remoteSub = remote.submissions.find((s) => s.id === submissionId);
         const localUpdated = localSubAtMount.updatedAt;

@@ -42,24 +42,30 @@ function backoffDelayMs(attempt: number, status?: number, retryAfterHeader?: str
 export async function callFunction<TResponse>(
   name: string,
   body: unknown,
-  options?: { retries?: number },
+  options?: { retries?: number; authToken?: string },
 ): Promise<TResponse> {
   /**
    * 콜드 스타트·게이트웨이 오류(502/503/504)·쿼터 초과(429)·네트워크 단절은 재시도.
    * db-set은 전체 덮어쓰기라 재시도해도 안전(멱등). db-get/sheets-init도 멱등.
    * 30명 동시 로그인 시 Sheets API 분당 한도에 잠시 걸려 429가 떨어져도
    * 지수 백오프 + jitter 로 분산 재시도해 일부 학생만 실패하는 현상을 막는다.
+   *
+   * authToken: Supabase 함수처럼 Firebase ID 토큰을 요구하는 endpoint를 부를 때
+   * Authorization 헤더로 첨부. 만료된 토큰을 재시도해도 의미 없으므로 호출자가
+   * getIdToken(true)로 새 토큰을 발급받아 다시 호출해야 한다.
    */
   const maxRetries = options?.retries ?? 3;
   const url = `/.netlify/functions/${name}`;
   let lastError: Error | null = null;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (options?.authToken) headers["authorization"] = `Bearer ${options.authToken}`;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let res: Response;
     try {
       res = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify(body ?? {}),
       });
     } catch (e) {
