@@ -178,70 +178,149 @@ export default function WritePage() {
       setState({ ok: false, reason: "missing" });
       return;
     }
-    try {
-      const db = loadTeacherDb();
-      const share = findShare(db, token);
-      if (!share || !isShareActive(share)) {
-        setState({ ok: false, reason: "share" });
-        return;
-      }
-      const assignment = db.assignments.find((a) => a.id === share.assignmentId) || null;
-      if (!assignment) {
-        setState({ ok: false, reason: "assignment" });
-        return;
-      }
-      const cls =
-        db.classes.find((c) => c.students.some((s) => s.studentNo === studentNo)) || null;
-      if (!cls) {
-        setState({ ok: false, reason: "student" });
-        return;
-      }
-      const { submission } = getOrCreateSubmission({
-        assignmentId: assignment.id,
-        classId: cls.id,
-        studentNo,
-      });
-      const notes = db.feedbackNotes
-        .filter((n) => n.submissionId === submission.id && !n.resolvedAt)
-        .sort((a, b) => a.createdAt - b.createdAt);
-      const score = db.scores.find((s) => s.submissionId === submission.id) || null;
-      const comments = (db.teacherComments || [])
-        .filter((c) => c.submissionId === submission.id)
-        .sort((a, b) => b.createdAt - a.createdAt);
-      const transitions = (db.stepTransitions || [])
-        .filter((t) => t.submissionId === submission.id)
-        .sort((a, b) => a.timestamp - b.timestamp);
-      const aiInteractions = (db.aiInteractions || [])
-        .filter((i) => i.submissionId === submission.id)
-        .sort((a, b) => a.timestamp - b.timestamp);
+    let cancelled = false;
 
-      // GRASP 데이터 로드
-      // - DB에 값이 있으면 React 상태에도 반영
-      // - DB에 값이 없을 때 React 상태(graspData)를 null로 덮어쓰지 않음
-      //   (저장 직후 polling 동기화에서 잠깐 비어 보일 수 있음)
-      // - 모달 자동 열기는 "최초 진입에 GRASPS 미작성"인 경우로만 제한
-      //   → 한 번 닫힌 뒤 polling으로 모달이 자동 재오픈되는 버그 방지
-      const g = getGraspData(submission);
-      if (g) setGraspData(g);
-      if (!g && !initialLoadDone.current) setShowGraspForm(true);
-      initialLoadDone.current = true;
+    // ── 받은 TeacherDb-호환 객체에서 화면 상태를 추출 ─────────────────
+    // supabase 응답이든 시트 응답이든 동일한 모양이라 같은 함수로 처리.
+    function fillStateFromDb(db: TeacherDb) {
+      try {
+        const share = findShare(db, token);
+        if (!share || !isShareActive(share)) {
+          if (!cancelled) setState({ ok: false, reason: "share" });
+          return;
+        }
+        const assignment = db.assignments.find((a) => a.id === share.assignmentId) || null;
+        if (!assignment) {
+          if (!cancelled) setState({ ok: false, reason: "assignment" });
+          return;
+        }
+        const cls =
+          db.classes.find((c) => c.students.some((s) => s.studentNo === studentNo)) ||
+          null;
+        if (!cls) {
+          if (!cancelled) setState({ ok: false, reason: "student" });
+          return;
+        }
+        // 자기 submission이 db에 있으면 그것을 그대로 사용. 없으면
+        // getOrCreateSubmission이 빈 submission을 localStorage에 만들고 반환 —
+        // 이는 학생이 입력 중인 글의 임시 cache로만 쓰이고, 실제 truth는
+        // "저장하기" 클릭 시 partial push로 supabase에 동일 id로 들어간다.
+        const existing = db.submissions.find(
+          (s) =>
+            s.assignmentId === assignment.id &&
+            s.classId === cls.id &&
+            s.studentNo === studentNo,
+        );
+        const submission =
+          existing ??
+          getOrCreateSubmission({
+            assignmentId: assignment.id,
+            classId: cls.id,
+            studentNo,
+          }).submission;
 
-      setState({
-        ok: true,
-        db,
-        share,
-        assignment,
-        cls,
-        submission,
-        notes,
-        score,
-        comments,
-        transitions,
-        aiInteractions,
-      });
-    } catch {
-      setState({ ok: false, reason: "error" });
+        const notes = db.feedbackNotes
+          .filter((n) => n.submissionId === submission.id && !n.resolvedAt)
+          .sort((a, b) => a.createdAt - b.createdAt);
+        const score = db.scores.find((s) => s.submissionId === submission.id) || null;
+        const comments = (db.teacherComments || [])
+          .filter((c) => c.submissionId === submission.id)
+          .sort((a, b) => b.createdAt - a.createdAt);
+        const transitions = (db.stepTransitions || [])
+          .filter((t) => t.submissionId === submission.id)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        const aiInteractions = (db.aiInteractions || [])
+          .filter((i) => i.submissionId === submission.id)
+          .sort((a, b) => a.timestamp - b.timestamp);
+
+        // GRASP 데이터 로드
+        // - DB에 값이 있으면 React 상태에도 반영
+        // - DB에 값이 없을 때 React 상태(graspData)를 null로 덮어쓰지 않음
+        //   (저장 직후 polling 동기화에서 잠깐 비어 보일 수 있음)
+        // - 모달 자동 열기는 "최초 진입에 GRASPS 미작성"인 경우로만 제한
+        //   → 한 번 닫힌 뒤 polling으로 모달이 자동 재오픈되는 버그 방지
+        const g = getGraspData(submission);
+        if (g) setGraspData(g);
+        if (!g && !initialLoadDone.current) setShowGraspForm(true);
+        initialLoadDone.current = true;
+
+        if (!cancelled) {
+          setState({
+            ok: true,
+            db,
+            share,
+            assignment,
+            cls,
+            submission,
+            notes,
+            score,
+            comments,
+            transitions,
+            aiInteractions,
+          });
+        }
+      } catch {
+        if (!cancelled) setState({ ok: false, reason: "error" });
+      }
     }
+
+    async function load() {
+      if (isUsingSupabase) {
+        // Supabase가 single source of truth. localStorage는 학생이 입력 중인
+        // 본문을 보호하기 위한 임시 cache로만 의미가 있으므로, mount 시점의
+        // 화면 데이터는 무조건 원격에서 가져와 채운다.
+        let studentCode: string | undefined;
+        try {
+          if (typeof window !== "undefined") {
+            const raw = window.sessionStorage.getItem(
+              `writing-app:studentAuth:${token}`,
+            );
+            if (raw) {
+              const parsed = JSON.parse(raw) as { studentCode?: string };
+              studentCode = parsed.studentCode;
+            }
+          }
+        } catch {
+          /* 시크릿 모드 등 sessionStorage 사용 불가 — 본문 마스킹된 응답을 받음 */
+        }
+
+        try {
+          const remote = (await pullDbForShareView({
+            shareToken: token,
+            spreadsheetId: null,
+            studentNo,
+            studentCode,
+          })) as TeacherDb | null;
+          if (cancelled) return;
+          if (remote) {
+            fillStateFromDb(remote);
+            return;
+          }
+          // remote === null: share 자체가 없거나 만료. localStorage에 잔재가 있어도
+          // 화면에 표시하지 않는다 (다른 디바이스에서 share가 revoke된 케이스 대응).
+          setState({ ok: false, reason: "share" });
+          return;
+        } catch (e) {
+          if (cancelled) return;
+          console.warn(
+            "[Writing app] supabase pull failed; falling back to local cache:",
+            e,
+          );
+          // 네트워크 단절 등 일시 실패 시에만 localStorage cache로 마지막 화면을
+          // 유지. 다음 dbBump(저장/제출/단계 전환 등)에서 다시 supabase fetch 시도.
+          fillStateFromDb(loadTeacherDb());
+          return;
+        }
+      }
+
+      // 시트 모드: 기존처럼 localStorage가 truth source.
+      fillStateFromDb(loadTeacherDb());
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, [token, studentNo, dbBump]);
 
   const effectiveSheetId =

@@ -9,11 +9,16 @@ import {
   deleteSubmission,
   getGraspData,
   loadTeacherDb,
+  mergeTeacherDbs,
   saveTeacherDb,
   updateSubmission,
   upsertScore,
 } from "@/lib/localDb";
-import { deleteRemoteEntity } from "@/lib/spreadsheetSync";
+import {
+  deleteRemoteEntity,
+  isUsingSupabase,
+  pullDbFromSheetWithRetry,
+} from "@/lib/spreadsheetSync";
 import { nanoid } from "nanoid";
 import type {
   AiInteraction,
@@ -25,6 +30,7 @@ import type {
   StepTransition,
   Submission,
   TeacherComment,
+  TeacherDb,
 } from "@/lib/types";
 import { buildFinalReportSnapshot } from "@/lib/finalReport";
 import { GraspSummary } from "@/components/student/GraspSummary";
@@ -92,10 +98,36 @@ export default function TeacherAssignmentPage() {
   const [exportBusyClassId, setExportBusyClassId] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  // 실시간 모니터링 자동 새로고침
+  // 실시간 모니터링 자동 새로고침. Supabase 모드면 polling 시점마다 원격 DB를
+  // 한 번 pull해 다른 디바이스(다른 교사·학생 partial push)의 최신 상태를 반영.
+  // 시트 모드는 그대로 단순 dbBump만 — 코얼레싱 push 흐름이 자체 머지를 하므로
+  // 추가 pull이 필요 없다.
   useEffect(() => {
-    const id = window.setInterval(() => setDbBump((v) => v + 1), 8000);
-    return () => clearInterval(id);
+    let cancelled = false;
+    async function pullAndBump() {
+      if (cancelled) return;
+      if (isUsingSupabase) {
+        try {
+          const r = await pullDbFromSheetWithRetry("", { attempts: 1 });
+          if (cancelled) return;
+          if (r.db) {
+            const merged = mergeTeacherDbs(loadTeacherDb(), r.db as TeacherDb);
+            saveTeacherDb(merged, { skipRemotePush: true });
+          }
+        } catch (e) {
+          console.warn("[Writing app] assignment polling supabase pull failed:", e);
+        }
+      }
+      if (!cancelled) setDbBump((v) => v + 1);
+    }
+
+    // mount 직후 한 번 즉시 sync (학생 마지막 변경분이 8초 늦게 보이지 않도록)
+    void pullAndBump();
+    const id = window.setInterval(() => void pullAndBump(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   const state = useMemo(() => {
@@ -649,7 +681,13 @@ export default function TeacherAssignmentPage() {
                       <div className={styles.ai}>
                         AI {state.aiCountBySubmissionId.get(s.id) || 0}
                         {" · "}
-                        {(s.outlineText + s.draftText + s.reviseText).replace(/\s/g, "").length}자
+                        {/*
+                          학생이 진행한 가장 마지막 단계의 본문 글자수(공백 포함)를 표시.
+                          이전엔 outline+draft+revise를 모두 합쳐 공백 제거 후 길이를
+                          썼는데, 같은 글이 단계 흐름으로 발전한 것이라 합산은 사실상
+                          중복 카운트가 되어 학생 화면 글자수와 어긋났다.
+                        */}
+                        {(s.reviseText || s.draftText || s.outlineText).length}자
                       </div>
                     </button>
                   ))}

@@ -15,6 +15,7 @@ import {
 import {
   deleteRemoteEntity,
   flushPendingPush,
+  isUsingSupabase,
   pullDbFromSheetWithRetry,
   pushDbToSheet,
   setActiveSpreadsheetId,
@@ -95,6 +96,36 @@ export default function TeacherPage() {
     } catch {
       /* ignore */
     }
+  }, [user]);
+
+  /**
+   * Supabase 모드: 로그인 직후 한 번 원격 DB를 pull해 localStorage에 머지한다.
+   * 다른 디바이스에서 변경된 학급/과제/제출이 즉시 반영되도록 하는 mount-once
+   * sync. localStorage가 stale인 경우 그 잔재가 화면에 표시되는 것을 막는다.
+   * 시트 모드는 사용자가 명시적으로 "🔄 시트에서 동기화"를 눌러야 동작 — 기존
+   * 동작 그대로.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || !user) return;
+    if (!isUsingSupabase) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        // pullDbFromSheetWithRetry는 supabase 모드에서 supabase-db-get을 호출하며
+        // sid 인자는 무시된다. 빈 string 전달.
+        const result = await pullDbFromSheetWithRetry("", { attempts: 1 });
+        if (cancelled || !result.db) return;
+        const merged = mergeTeacherDbs(loadTeacherDb(), result.db as TeacherDb);
+        // skipRemotePush: true — 방금 받은 데이터를 다시 push할 필요 없음.
+        saveTeacherDb(merged, { skipRemotePush: true });
+        setDbVersion((v) => v + 1);
+      } catch (e) {
+        console.warn("[Writing app] teacher mount supabase pull failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   const displayName = useMemo(() => {
