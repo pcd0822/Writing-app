@@ -29,6 +29,48 @@ import {
 const KEY = "writing-app:teacherDb:v1";
 
 /**
+ * Supabase 전환 시점에 모든 디바이스(교사·학생)의 stale localStorage cache를
+ * 한 번 자동 정리하기 위한 epoch ms.
+ *
+ * 동작:
+ *  - 디바이스가 이 timestamp 이후 처음 앱을 열면, 아래 키들의 캐시를 비우고
+ *    `LOCAL_RESET_MARKER_KEY`에 "이 reset을 적용함" 마커를 남긴다.
+ *  - 마커가 timestamp보다 같거나 크면 이미 정리된 디바이스라 다시 비우지 않는다.
+ *  - 미래에 또 다른 cache 정리가 필요해지면 이 상수를 더 큰 값으로 갱신해
+ *    배포하면, 모든 디바이스가 다시 한 번씩 reset된다.
+ *
+ * 주의: 학생이 입력했지만 아직 supabase에 push하지 않은 글이 cache에만 있다면
+ * 함께 사라질 수 있다. 적용 시점은 학생들의 미저장 분량이 적은 때(수업 외)를
+ * 권장. 정리 후 mount-once supabase pull(Phase 5b/6)이 fresh 데이터를 채운다.
+ */
+const LOCAL_RESET_TIMESTAMP_MS = Date.UTC(2026, 4, 8, 0, 0, 0); // 2026-05-08T00:00:00Z
+const LOCAL_RESET_MARKER_KEY = "writing-app:localResetAt";
+
+/** mount 진입점에서 한 번만 호출되도록 메모이즈. */
+let localResetChecked = false;
+
+function ensureLocalCacheFresh() {
+  if (typeof window === "undefined") return;
+  if (localResetChecked) return;
+  localResetChecked = true;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_RESET_MARKER_KEY);
+    const last = raw ? parseInt(raw, 10) : 0;
+    if (Number.isFinite(last) && last >= LOCAL_RESET_TIMESTAMP_MS) return;
+    // 정리 대상: TeacherDb 캐시(stale 학급/제출 잔재) + 학생 격리 마커 +
+    // 시트 ID 캐시. sessionStorage의 학생 인증 정보는 건드리지 않는다 —
+    // 페이지 새로고침 시 학번/코드 재입력을 막기 위함.
+    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(LAST_STUDENT_KEY);
+    window.localStorage.removeItem("writing-app:activeSpreadsheetId");
+    window.localStorage.setItem(LOCAL_RESET_MARKER_KEY, String(Date.now()));
+    console.info("[Writing app] localStorage cache reset (one-time policy).");
+  } catch (e) {
+    console.warn("[Writing app] localStorage reset failed:", e);
+  }
+}
+
+/**
  * 같은 디바이스를 다른 학생이 사용하게 되는 케이스를 격리하기 위한 마커.
  * share landing onEnter에서 인증 성공한 학생을 기록해두고, 다음에 다른 학생이
  * 인증되면 localStorage(teacherDb)를 비워서 직전 학생의 작성물이 노출되지 않게 한다.
@@ -161,6 +203,7 @@ function migrateToV5(parsed: Record<string, unknown>): TeacherDb {
 
 export function loadTeacherDb(): TeacherDb {
   assertBrowser();
+  ensureLocalCacheFresh();
   const raw = window.localStorage.getItem(KEY);
   if (!raw) return defaultDb;
   try {

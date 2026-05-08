@@ -448,6 +448,21 @@ export default function WritePage() {
         const localUpdated = localSubAtMount.updatedAt;
         const remoteUpdated = remoteSub?.updatedAt ?? 0;
 
+        // Supabase 모드: 학생 디바이스의 cache가 supabase보다 신선해 보여도 자동 push로
+        // 회수하지 않는다. 마이그레이션 직후나 cache reset 후 첫 접속 시점에 학생 cache의
+        // stale 빈 submission(updatedAt만 미래로 떠 있는 잔재)이 supabase에 들어간 시트
+        // 데이터를 빈 글로 덮어쓰는 사고가 있었음 — 사용자 보고. 학생이 직접 "저장하기"를
+        // 누른 뒤에야 supabase에 들어가도록 강제.
+        if (isUsingSupabase) {
+          if (remoteSub && remoteUpdated > localUpdated) {
+            replaceSubmissionFromRemote(remoteSub);
+            setRecoveryNotice({ kind: "downloaded" });
+            bumpDb();
+          }
+          return;
+        }
+
+        // 시트 모드: 기존 동작 유지(시트 lag 보정 + 디바이스 간 자동 회수)
         if (localUpdated > remoteUpdated) {
           // 자동 회수: localStorage에 있지만 시트엔 안 올라간 분량을 partial push로 회수
           const hasContent =
