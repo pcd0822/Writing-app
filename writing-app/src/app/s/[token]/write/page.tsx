@@ -755,6 +755,14 @@ export default function WritePage() {
       updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
       await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
     } else {
+      // Supabase 모드에서 studentAuth가 없으면 풀 db push가 다른 학생들의 마스킹된
+      // 빈 본문을 supabase에 upsert해 사고가 난다. 학생이 share landing을 다시 거치게
+      // 명시적으로 거부.
+      if (isUsingSupabase) {
+        throw new Error(
+          "학번 인증 정보가 없습니다. 처음 화면(공유 링크)으로 돌아가 학번과 학생 코드를 다시 입력해주세요.",
+        );
+      }
       updateSubmissionAndPushStudent(state.submission.id, patch, sheetSaveOpts);
       if (effectiveSheetId) {
         await flushPendingPush(effectiveSheetId);
@@ -791,6 +799,12 @@ export default function WritePage() {
     if (studentAuth) {
       updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
     } else {
+      if (isUsingSupabase) {
+        setError(
+          "학번 인증 정보가 없습니다. 처음 화면(공유 링크)으로 돌아가 학번과 학생 코드를 다시 입력해주세요.",
+        );
+        return;
+      }
       updateSubmissionAndPushStudent(state.submission.id, patch, sheetSaveOpts);
     }
     bumpDb();
@@ -922,6 +936,12 @@ export default function WritePage() {
         updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
         await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
       } else {
+        // Supabase 모드에서 studentAuth 없으면 풀 db push가 다른 학생 본문을 망가뜨림.
+        if (isUsingSupabase) {
+          throw new Error(
+            "학번 인증 정보가 없습니다. 처음 화면(공유 링크)으로 돌아가 학번과 학생 코드를 다시 입력해주세요.",
+          );
+        }
         updateSubmissionAndPushStudent(state.submission.id, patch, sheetSaveOpts);
         if (effectiveSheetId) {
           await flushPendingPush(effectiveSheetId);

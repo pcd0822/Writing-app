@@ -147,6 +147,19 @@ export async function pushDbToSheet(
   }
   const payload = prepareDbForSheetPush(toPush);
   if (USE_SUPABASE) {
+    // 학생 디바이스 push 차단:
+    // share-bootstrap 응답의 db는 다른 학생들의 본문이 빈 string으로 마스킹된
+    // 상태로 학생 localStorage에 들어가 있다. 이걸 supabase-db-set이 upsert하면
+    // 같은 학급의 다른 학생들 본문이 모두 빈 글로 덮어쓰여진다(실제 사고 발생).
+    // 학생 변경은 반드시 partial endpoint(supabase-db-set-submission)로만 흘러야
+    // 한다. saveTeacherDb는 학생 path에서 studentPush:true를 줘 skipPullMerge:true
+    // 옵션이 코얼레싱에 전달되므로, 이 플래그를 학생 디바이스의 fingerprint로 사용.
+    if (options?.skipPullMerge === true) {
+      console.warn(
+        "[Writing app] supabase mode: blocked full-db push from student-context to prevent masked-bodies overwrite.",
+      );
+      return toPush;
+    }
     const opts = await teacherAuthOptions();
     await callFunction<{ ok: true }>("supabase-db-set", { db: payload }, opts);
   } else {
