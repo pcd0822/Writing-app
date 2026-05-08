@@ -913,6 +913,17 @@ export async function authenticateStudent(
  * Upsert a single submission while preserving teacher-only fields against a
  * stale student-side payload (mirrors the sheet implementation's three-way
  * merge for outline/draft/revise/finalApproved/rejectReason and finalReport).
+ *
+ * Lookup is done by the natural key (assignment_id, class_id, student_no) —
+ * not by `incoming.id` — because the student client may mint a fresh nanoid
+ * when share-bootstrap couldn't find a pre-existing submission for them
+ * (or when local cache had been cleared). The (a, c, s) tuple has a UNIQUE
+ * constraint on Supabase, so a plain upsert(onConflict: id) would have
+ * exploded with "duplicate key" the moment the migrated row's id differed
+ * from the new client-generated id.
+ *
+ * Existing row → UPDATE (id preserved so child FKs in feedback_notes /
+ * ai_logs / etc. don't break). No row → INSERT with the client's id.
  */
 export async function upsertStudentSubmission(
   incoming: Submission,
@@ -920,48 +931,67 @@ export async function upsertStudentSubmission(
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const db = getSupabaseAdmin();
 
-  const { data: existing, error: readErr } = await db
+  const { data: existingByTuple, error: tupleErr } = await db
     .from("submissions")
     .select(
-      "outline_approved_at, draft_approved_at, revise_approved_at, final_approved_at, final_report_published_at, outline_reject_reason, draft_reject_reason, revise_reject_reason, final_report_snapshot",
+      "id, outline_approved_at, draft_approved_at, revise_approved_at, final_approved_at, final_report_published_at, outline_reject_reason, draft_reject_reason, revise_reject_reason, final_report_snapshot, grasp_data",
     )
-    .eq("id", incoming.id)
+    .eq("assignment_id", incoming.assignmentId)
+    .eq("class_id", incoming.classId)
+    .eq("student_no", incoming.studentNo)
     .maybeSingle();
-  if (readErr) return { ok: false, status: 500, error: readErr.message };
+  if (tupleErr) return { ok: false, status: 500, error: tupleErr.message };
 
   const merged = submissionToRow(incoming);
-  if (existing) {
-    // Teacher-only fields: keep DB value.
-    merged.outline_approved_at = existing.outline_approved_at as number | null;
-    merged.draft_approved_at = existing.draft_approved_at as number | null;
-    merged.revise_approved_at = existing.revise_approved_at as number | null;
-    merged.final_approved_at = existing.final_approved_at as number | null;
-    merged.final_report_published_at = existing.final_report_published_at as number | null;
-    merged.outline_reject_reason = (existing.outline_reject_reason as string) ?? "";
-    merged.draft_reject_reason = (existing.draft_reject_reason as string) ?? "";
-    merged.revise_reject_reason = (existing.revise_reject_reason as string) ?? "";
-    // finalReportSnapshot: keep existing unless student explicitly sent a
-    // non-empty value (matches sheet behaviour).
+
+  if (existingByTuple) {
+    // Teacher-only fields: keep the DB value so a stale student payload
+    // (whose client never observed the latest approval/reject) cannot blank
+    // out a teacher's recent action.
+    merged.outline_approved_at = (existingByTuple.outline_approved_at as number | null) ?? null;
+    merged.draft_approved_at = (existingByTuple.draft_approved_at as number | null) ?? null;
+    merged.revise_approved_at = (existingByTuple.revise_approved_at as number | null) ?? null;
+    merged.final_approved_at = (existingByTuple.final_approved_at as number | null) ?? null;
+    merged.final_report_published_at =
+      (existingByTuple.final_report_published_at as number | null) ?? null;
+    merged.outline_reject_reason = (existingByTuple.outline_reject_reason as string) ?? "";
+    merged.draft_reject_reason = (existingByTuple.draft_reject_reason as string) ?? "";
+    merged.revise_reject_reason = (existingByTuple.revise_reject_reason as string) ?? "";
     if (!incoming.finalReportSnapshot) {
-      merged.final_report_snapshot = (existing.final_report_snapshot as string) ?? "";
+      merged.final_report_snapshot =
+        (existingByTuple.final_report_snapshot as string) ?? "";
     }
   }
 
-  // graspData semantics: undefined means "no change" → keep DB value;
-  // a string (even "") means the student saved a new GRASPS payload → write.
-  if (graspData === undefined && existing) {
-    const { data: gd, error: gdErr } = await db
-      .from("submissions")
-      .select("grasp_data")
-      .eq("id", incoming.id)
-      .maybeSingle();
-    if (gdErr) return { ok: false, status: 500, error: gdErr.message };
-    if (gd) merged.grasp_data = (gd.grasp_data as string) ?? "";
+  // graspData: undefined = "no change" → keep DB value; "" or non-empty =
+  // student explicitly saved a new GRASPS payload → write through.
+  if (graspData === undefined && existingByTuple) {
+    merged.grasp_data = (existingByTuple.grasp_data as string) ?? "";
   } else if (graspData !== undefined) {
     merged.grasp_data = graspData;
   }
 
-  const { error: upErr } = await db.from("submissions").upsert(merged as never, { onConflict: "id" });
-  if (upErr) return { ok: false, status: 500, error: upErr.message };
+  if (existingByTuple) {
+    // UPDATE — never change id/assignment_id/class_id/student_no so child
+    // FKs and the unique constraint stay stable.
+    const targetId = existingByTuple.id as string;
+    const {
+      id: _id,
+      assignment_id: _aid,
+      class_id: _cid,
+      student_no: _sno,
+      ...updateFields
+    } = merged;
+    void _id; void _aid; void _cid; void _sno;
+    const { error: upErr } = await db
+      .from("submissions")
+      .update(updateFields)
+      .eq("id", targetId);
+    if (upErr) return { ok: false, status: 500, error: upErr.message };
+  } else {
+    const { error: insErr } = await db.from("submissions").insert(merged as never);
+    if (insErr) return { ok: false, status: 500, error: insErr.message };
+  }
+
   return { ok: true };
 }
