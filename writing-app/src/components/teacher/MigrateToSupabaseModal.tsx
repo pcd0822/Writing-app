@@ -21,6 +21,8 @@ type Counts = {
   aiInteractions: number;
   teacherComments: number;
   tombstones: number;
+  /** 시트에 (학생, 과제, 학급) 중복으로 들어있어 1개로 정리한 submission 수 */
+  dedupedSubmissions?: number;
 };
 
 type MigrateResponse = { ok: true; counts: Counts | null };
@@ -125,7 +127,15 @@ export function MigrateToSupabaseModal({ isOpen, onClose, spreadsheetId }: Props
                 과제 {counts.assignments}개 / 할당 {counts.allocations}건 / 공유 링크{" "}
                 {counts.shares}개
               </li>
-              <li>제출물 {counts.submissions}개</li>
+              <li>
+                제출물 {counts.submissions}개
+                {counts.dedupedSubmissions && counts.dedupedSubmissions > 0 ? (
+                  <span style={{ color: "#a05a00" }}>
+                    {" "}
+                    (중복 {counts.dedupedSubmissions}개 정리됨)
+                  </span>
+                ) : null}
+              </li>
               <li>
                 피드백 노트 {counts.feedbackNotes} · AI 로그 {counts.aiLogs} · 점수{" "}
                 {counts.scores}

@@ -497,6 +497,54 @@ function tombstoneToRow(teacherUid: string, t: Tombstone): SupaTombstoneRow {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Sheet→Supabase migration cleanup.
+//
+// Sheet data accumulated over time can hold two submission rows with
+// different `id`s but the same (assignmentId, classId, studentNo) — the
+// fingerprint of a past multi-device race that minted a second submission
+// for the same student/assignment. Postgres' UNIQUE
+// (assignment_id, class_id, student_no) constraint rejects that, so the
+// migration would die at the submissions upsert.
+//
+// Resolution: keep the row with the largest `updatedAt` (latest student
+// activity wins) and drop the others. Children (feedbackNotes, aiLogs,
+// scores, stepTransitions, aiInteractions, teacherComments) of the dropped
+// rows are filtered out so we don't generate FK violations downstream.
+// Children attached to the surviving id are kept untouched.
+// ─────────────────────────────────────────────────────────────────────────
+
+export function dedupSubmissionsForMigration(
+  db: TeacherDb,
+): { db: TeacherDb; dedupedCount: number } {
+  const byTuple = new Map<string, Submission>();
+  for (const s of db.submissions) {
+    const key = `${s.assignmentId}::${s.classId}::${s.studentNo}`;
+    const existing = byTuple.get(key);
+    if (!existing || s.updatedAt > existing.updatedAt) {
+      byTuple.set(key, s);
+    }
+  }
+  const dedupedSubmissions = [...byTuple.values()];
+  const dedupedCount = db.submissions.length - dedupedSubmissions.length;
+  if (dedupedCount === 0) return { db, dedupedCount: 0 };
+
+  const validIds = new Set(dedupedSubmissions.map((s) => s.id));
+  return {
+    db: {
+      ...db,
+      submissions: dedupedSubmissions,
+      feedbackNotes: db.feedbackNotes.filter((n) => validIds.has(n.submissionId)),
+      aiLogs: db.aiLogs.filter((l) => validIds.has(l.submissionId)),
+      scores: db.scores.filter((s) => validIds.has(s.submissionId)),
+      stepTransitions: db.stepTransitions.filter((t) => validIds.has(t.submissionId)),
+      aiInteractions: db.aiInteractions.filter((i) => validIds.has(i.submissionId)),
+      teacherComments: db.teacherComments.filter((c) => validIds.has(c.submissionId)),
+    },
+    dedupedCount,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Read: assemble TeacherDb for a given teacher_uid.
 // ─────────────────────────────────────────────────────────────────────────
 

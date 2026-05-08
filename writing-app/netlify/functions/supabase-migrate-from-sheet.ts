@@ -2,7 +2,7 @@ import type { Handler } from "@netlify/functions";
 import { z } from "zod";
 import { ensureWorkbookStructure } from "./_sheets";
 import { readTeacherDbFromSpreadsheet } from "./_sheetDbReadWrite";
-import { writeTeacherDbForUser } from "./_supabaseDb";
+import { dedupSubmissionsForMigration, writeTeacherDbForUser } from "./_supabaseDb";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { requireTeacher } from "./_firebaseAuth";
 
@@ -36,12 +36,17 @@ export const handler: Handler = async (event) => {
 
   try {
     await ensureWorkbookStructure(parsed.data.spreadsheetId);
-    const db = await readTeacherDbFromSpreadsheet(parsed.data.spreadsheetId);
-    if (!db) {
+    const raw = await readTeacherDbFromSpreadsheet(parsed.data.spreadsheetId);
+    if (!raw) {
       // Sheet readable but produced no recoverable data (e.g. brand new
       // workbook). Same outcome as the EMPTY_DB catch below.
       return json(200, { ok: true, counts: null });
     }
+
+    // Drop submission duplicates (see dedupSubmissionsForMigration). Their
+    // children are filtered too, so we never try to insert a feedback_note /
+    // ai_log / score for an id that no longer exists.
+    const { db, dedupedCount } = dedupSubmissionsForMigration(raw);
 
     await writeTeacherDbForUser(auth.teacher.uid, db);
 
@@ -61,6 +66,7 @@ export const handler: Handler = async (event) => {
         aiInteractions: db.aiInteractions.length,
         teacherComments: db.teacherComments.length,
         tombstones: db.tombstones.length,
+        dedupedSubmissions: dedupedCount,
       },
     });
   } catch (e) {
