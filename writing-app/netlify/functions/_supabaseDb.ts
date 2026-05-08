@@ -983,11 +983,24 @@ export async function upsertStudentSubmission(
       ...updateFields
     } = merged;
     void _id; void _aid; void _cid; void _sno;
-    const { error: upErr } = await db
+    // .select() so we get the affected rows back: a successful UPDATE
+    // that matched zero rows (e.g. concurrent delete, RLS, stale id) used
+    // to return ok with no error and the student would believe they had
+    // saved while Supabase had nothing new — confirming via the returned
+    // row count makes that case observable.
+    const { data: updatedRows, error: upErr } = await db
       .from("submissions")
       .update(updateFields)
-      .eq("id", targetId);
+      .eq("id", targetId)
+      .select("id");
     if (upErr) return { ok: false, status: 500, error: upErr.message };
+    if (!updatedRows || updatedRows.length === 0) {
+      return {
+        ok: false,
+        status: 500,
+        error: `submission update touched 0 rows (id=${targetId})`,
+      };
+    }
   } else {
     const { error: insErr } = await db.from("submissions").insert(merged as never);
     if (insErr) return { ok: false, status: 500, error: insErr.message };
