@@ -753,8 +753,54 @@ async function replaceStudentsForClasses(
 
 export async function writeTeacherDbForUser(
   teacherUid: string,
-  incoming: TeacherDb,
+  incomingRaw: TeacherDb,
 ): Promise<void> {
+  // 0) Honour tombstones — anything marked deleted in Supabase must NOT be
+  //    re-inserted by an upsert from a sheet/local source that hasn't
+  //    observed the deletion. The migration path is the most common
+  //    offender: supabase-delete only writes the tombstone server-side, so
+  //    the sheet still holds the row that would otherwise resurrect on the
+  //    next migrate. We also union with incomingRaw.tombstones so a
+  //    sheet-side deletion shipped in the same payload is honoured.
+  //    Children of a tombstoned parent (allocations/share_links/
+  //    submissions/feedback_notes/...) are dropped here so the upsert
+  //    pipeline below never sees them and FK violations can't occur.
+  const { data: existingTombs, error: tombErr } = await getSupabaseAdmin()
+    .from("tombstones")
+    .select("kind, entity_id")
+    .eq("teacher_uid", teacherUid);
+  if (tombErr) throw new Error(`tombstones read: ${tombErr.message}`);
+
+  const tombClassIds = new Set<string>();
+  const tombAssignmentIds = new Set<string>();
+  const tombSubmissionIds = new Set<string>();
+  for (const t of (existingTombs ?? []) as Array<{ kind: string; entity_id: string }>) {
+    if (t.kind === "class") tombClassIds.add(t.entity_id);
+    else if (t.kind === "assignment") tombAssignmentIds.add(t.entity_id);
+    else if (t.kind === "submission") tombSubmissionIds.add(t.entity_id);
+  }
+  for (const t of incomingRaw.tombstones) {
+    if (t.kind === "class") tombClassIds.add(t.id);
+    else if (t.kind === "assignment") tombAssignmentIds.add(t.id);
+    else if (t.kind === "submission") tombSubmissionIds.add(t.id);
+  }
+
+  const incoming: TeacherDb = {
+    ...incomingRaw,
+    classes: incomingRaw.classes.filter((c) => !tombClassIds.has(c.id)),
+    assignments: incomingRaw.assignments.filter((a) => !tombAssignmentIds.has(a.id)),
+    allocations: incomingRaw.allocations.filter(
+      (a) => !tombAssignmentIds.has(a.assignmentId),
+    ),
+    shares: incomingRaw.shares.filter((s) => !tombAssignmentIds.has(s.assignmentId)),
+    submissions: incomingRaw.submissions.filter(
+      (s) =>
+        !tombSubmissionIds.has(s.id) &&
+        !tombClassIds.has(s.classId) &&
+        !tombAssignmentIds.has(s.assignmentId),
+    ),
+  };
+
   // 1) Parents — classes and assignments. After these succeed, child rows
   //    can reference them via FK.
   const classRows = incoming.classes.map((c) => classToRow(teacherUid, c));
