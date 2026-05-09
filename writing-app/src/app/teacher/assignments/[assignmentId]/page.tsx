@@ -99,9 +99,9 @@ export default function TeacherAssignmentPage() {
   const [exportError, setExportError] = useState<string | null>(null);
 
   // 실시간 모니터링 자동 새로고침. Supabase 모드면 polling 시점마다 원격 DB를
-  // 한 번 pull해 다른 디바이스(다른 교사·학생 partial push)의 최신 상태를 반영.
-  // 시트 모드는 그대로 단순 dbBump만 — 코얼레싱 push 흐름이 자체 머지를 하므로
-  // 추가 pull이 필요 없다.
+  // 그대로 localStorage에 덮어 학생 partial push의 최신 상태를 즉시 반영한다.
+  // mergeTeacherDbs를 쓰지 않는 이유는 teacher/page.tsx의 mount-once useEffect
+  // 주석 참조 — local의 stale 빈 submission이 supabase의 글을 덮는 사고 차단.
   useEffect(() => {
     let cancelled = false;
     async function pullAndBump() {
@@ -111,8 +111,7 @@ export default function TeacherAssignmentPage() {
           const r = await pullDbFromSheetWithRetry("", { attempts: 1 });
           if (cancelled) return;
           if (r.db) {
-            const merged = mergeTeacherDbs(loadTeacherDb(), r.db as TeacherDb);
-            saveTeacherDb(merged, { skipRemotePush: true });
+            saveTeacherDb(r.db as TeacherDb, { skipRemotePush: true });
           }
         } catch (e) {
           console.warn("[Writing app] assignment polling supabase pull failed:", e);

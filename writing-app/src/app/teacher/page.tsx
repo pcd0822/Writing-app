@@ -99,9 +99,16 @@ export default function TeacherPage() {
   }, [user]);
 
   /**
-   * Supabase 모드: 로그인 직후 한 번 원격 DB를 pull해 localStorage에 머지한다.
-   * 다른 디바이스에서 변경된 학급/과제/제출이 즉시 반영되도록 하는 mount-once
-   * sync. localStorage가 stale인 경우 그 잔재가 화면에 표시되는 것을 막는다.
+   * Supabase 모드: 로그인 직후 한 번 원격 DB를 pull해 localStorage를 통째로 교체.
+   *
+   * 의도적으로 mergeTeacherDbs를 쓰지 않는다 — submissionMerge가 updatedAt 큰
+   * 쪽을 우선하는데, 교사 디바이스 localStorage의 stale 빈 submission이
+   * supabase의 글 있는 submission보다 updatedAt이 신선해 보이면 빈 local이
+   * supabase의 글을 덮어 화면에 0으로 보이는 사고가 있었음. supabase가 단일
+   * source of truth라는 사용자 정책에 따라, mount-once 시점에는 무조건 원격
+   * 데이터로 교체한다. 교사가 그 사이 만든 변경분은 modal의 saveTeacherDb가
+   * 이미 supabase-db-set으로 push한 상태이므로 응답에 포함되어 돌아온다.
+   *
    * 시트 모드는 사용자가 명시적으로 "🔄 시트에서 동기화"를 눌러야 동작 — 기존
    * 동작 그대로.
    */
@@ -111,13 +118,10 @@ export default function TeacherPage() {
     let cancelled = false;
     void (async () => {
       try {
-        // pullDbFromSheetWithRetry는 supabase 모드에서 supabase-db-get을 호출하며
-        // sid 인자는 무시된다. 빈 string 전달.
         const result = await pullDbFromSheetWithRetry("", { attempts: 1 });
         if (cancelled || !result.db) return;
-        const merged = mergeTeacherDbs(loadTeacherDb(), result.db as TeacherDb);
-        // skipRemotePush: true — 방금 받은 데이터를 다시 push할 필요 없음.
-        saveTeacherDb(merged, { skipRemotePush: true });
+        // 머지 없이 직접 교체. supabase가 truth.
+        saveTeacherDb(result.db as TeacherDb, { skipRemotePush: true });
         setDbVersion((v) => v + 1);
       } catch (e) {
         console.warn("[Writing app] teacher mount supabase pull failed:", e);
