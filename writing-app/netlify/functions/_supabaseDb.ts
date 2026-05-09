@@ -818,16 +818,20 @@ export async function writeTeacherDbForUser(
     const protectedSubmissions: Submission[] = candidateSubmissions.map((s) => {
       const prior = existingById.get(s.id);
       if (!prior) return s; // brand-new row, nothing to protect
+      // 학생만 변경하는 5개 본문 필드(outline/draft/revise/grasp/finalReport).
+      // 교사 fullDB push는 이 필드를 *절대* 자기 캐시 값으로 덮어쓰지 않고,
+      // 무조건 supabase의 현재값을 사용한다. 이전 정책("incoming이 빈
+      // string일 때만 supabase 값으로 보존")은 교사 캐시가 stale인 채 push
+      // 되면(예: 학생이 220자 저장 → 교사 캐시는 200자) 학생의 최신 글을
+      // 회귀시킬 수 있다는 race가 남아 있었다. 이 path는 학생의 최신 본문을
+      // 100% 보호하기 위해 incoming 측 본문은 폐기.
       return {
         ...s,
-        outlineText: s.outlineText !== "" ? s.outlineText : prior.outline_text,
-        draftText: s.draftText !== "" ? s.draftText : prior.draft_text,
-        reviseText: s.reviseText !== "" ? s.reviseText : prior.revise_text,
-        graspData: s.graspData !== "" ? s.graspData : prior.grasp_data,
-        finalReportSnapshot:
-          (s.finalReportSnapshot ?? "") !== ""
-            ? s.finalReportSnapshot
-            : prior.final_report_snapshot,
+        outlineText: prior.outline_text ?? "",
+        draftText: prior.draft_text ?? "",
+        reviseText: prior.revise_text ?? "",
+        graspData: prior.grasp_data ?? "",
+        finalReportSnapshot: prior.final_report_snapshot ?? "",
       };
     });
 
