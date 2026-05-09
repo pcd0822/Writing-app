@@ -779,12 +779,64 @@ export async function writeTeacherDbForUser(
   // 5) Submissions — id is stable; safe to upsert. Filter out submissions
   //    whose assignmentId/classId are not in the incoming db (defensive: a
   //    bug elsewhere shouldn't let us write a submission with a foreign FK).
-  const submissionRows = incoming.submissions
-    .filter((s) => knownAssignmentIds.has(s.assignmentId) && knownClassIds.has(s.classId))
-    .map(submissionToRow);
-  await upsertChunked("submissions", submissionRows, "id");
+  //
+  // Self-defense against masked-body overwrites:
+  //
+  // share-bootstrap returns submissions with all fellow students' body text
+  // blanked. If a stale, share-bootstrap-derived TeacherDb ever reaches this
+  // function (any path — racy enqueue, future helper that forgets the
+  // student-context option, etc.), the masked rows would silently overwrite
+  // real student writing in supabase. We've seen with_text drop from 78 to 1
+  // in production when this race fired. So: never let a full-db push erase a
+  // body field. Per-row, per-field merge with whatever supabase currently has,
+  // keeping the existing value when the incoming one is empty. Per-student
+  // explicit pushes (the partial endpoint) take a different code path and
+  // aren't affected by this filter.
+  const candidateSubmissions = incoming.submissions.filter(
+    (s) => knownAssignmentIds.has(s.assignmentId) && knownClassIds.has(s.classId),
+  );
+  if (candidateSubmissions.length > 0) {
+    const candidateIds = candidateSubmissions.map((s) => s.id);
+    const { data: existingRows, error: existingErr } = await getSupabaseAdmin()
+      .from("submissions")
+      .select(
+        "id,outline_text,draft_text,revise_text,grasp_data,final_report_snapshot",
+      )
+      .in("id", candidateIds);
+    if (existingErr) throw new Error(`submissions read-back: ${existingErr.message}`);
+    const existingById = new Map(
+      ((existingRows ?? []) as Array<{
+        id: string;
+        outline_text: string;
+        draft_text: string;
+        revise_text: string;
+        grasp_data: string;
+        final_report_snapshot: string;
+      }>).map((r) => [r.id, r]),
+    );
 
-  const knownSubmissionIds = new Set(submissionRows.map((s) => s.id));
+    const protectedSubmissions: Submission[] = candidateSubmissions.map((s) => {
+      const prior = existingById.get(s.id);
+      if (!prior) return s; // brand-new row, nothing to protect
+      return {
+        ...s,
+        outlineText: s.outlineText !== "" ? s.outlineText : prior.outline_text,
+        draftText: s.draftText !== "" ? s.draftText : prior.draft_text,
+        reviseText: s.reviseText !== "" ? s.reviseText : prior.revise_text,
+        graspData: s.graspData !== "" ? s.graspData : prior.grasp_data,
+        finalReportSnapshot:
+          (s.finalReportSnapshot ?? "") !== ""
+            ? s.finalReportSnapshot
+            : prior.final_report_snapshot,
+      };
+    });
+
+    await upsertChunked("submissions", protectedSubmissions.map(submissionToRow), "id");
+  }
+
+  // children FK 검증용 — protect block에서 실제로 upsert가 일어났는지와 무관하게
+  // candidateSubmissions의 id 집합을 사용. (id가 알려진 submission의 children만 통과)
+  const knownSubmissionIds = new Set(candidateSubmissions.map((s) => s.id));
   const subChildOk = (subId: string) => knownSubmissionIds.has(subId);
 
   // 6) Submission children.

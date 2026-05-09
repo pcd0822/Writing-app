@@ -90,7 +90,12 @@ export default function TeacherPage() {
         return s;
       });
       if (changed) {
-        saveTeacherDb({ ...db, shares });
+        // skipRemotePush: true — 이 useEffect는 단순히 share 행에 spreadsheetId를
+        // 채워주는 로컬 정리 작업이다. 만약 default push로 보냈다가 그 시점의
+        // localStorage가 share-bootstrap 응답(다른 학생 본문이 빈 string)으로
+        // 마스킹돼 있으면, 풀-DB push가 supabase의 다른 학생 글을 모조리
+        // 빈 string으로 덮는 사고로 이어진다.
+        saveTeacherDb({ ...db, shares }, { skipRemotePush: true });
         setDbVersion((v) => v + 1);
       }
     } catch {

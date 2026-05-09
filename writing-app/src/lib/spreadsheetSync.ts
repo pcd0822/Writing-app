@@ -215,6 +215,18 @@ export function pushDbToSheetCoalesced(
   db: unknown,
   options?: PushCoalesceOptions,
 ) {
+  // Supabase 모드 + 학생 페이지에서는 enqueue 자체를 차단한다. 800ms 코얼레싱
+  // 윈도우 동안 사용자가 다른 페이지로 이동하면, setTimeout이 발동되는 시점의
+  // isStudentPage()가 false가 돼 pushDbToSheet의 path 가드를 통과해버리는
+  // race가 있었다. enqueue 시점에 학생 path면 큐에 넣지 않음으로써 race 자체를
+  // 제거한다. 학생 변경은 partial endpoint(pushSubmissionPartialCoalesced)
+  // 만이 supabase에 도달하는 유일한 통로.
+  if (USE_SUPABASE && isStudentPage()) {
+    console.warn(
+      "[Writing app] supabase mode: dropped full-db push enqueue from student page.",
+    );
+    return;
+  }
   pushPending.set(spreadsheetId, db);
   if (options) pushOptions.set(spreadsheetId, options);
   const existing = pushTimers.get(spreadsheetId);
