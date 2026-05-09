@@ -1013,19 +1013,21 @@ export async function updateSubmissionWithRemoteMerge(
  * 학생이 명시적으로 "저장하기/제출하기"를 누를 때만 시트로 보낸다.
  */
 export function updateSubmissionLocalOnly(
-  submissionId: string,
+  current: Submission,
   patch: Partial<Submission>,
 ): Submission {
+  // supabase 모드에서는 write 페이지 mount가 state.submission을
+  // createBlankSubmission으로 메모리에만 만들 수 있어, 첫 keystroke 시점에는
+  // localStorage에 그 id가 아직 없다. 호출자가 넘긴 current를 base로 삼아
+  // 없으면 insert, 있으면 update — 두 경우 모두 처리해 "submission not found"
+  // throw를 막는다.
   const db = loadTeacherDb();
-  const idx = db.submissions.findIndex((s) => s.id === submissionId);
-  if (idx < 0) throw new Error("submission not found");
-  const updated = {
-    ...db.submissions[idx]!,
-    ...patch,
-    updatedAt: Date.now(),
-  };
-  const nextSubmissions = [...db.submissions];
-  nextSubmissions[idx] = updated;
+  const updated: Submission = { ...current, ...patch, updatedAt: Date.now() };
+  const idx = db.submissions.findIndex((s) => s.id === current.id);
+  const nextSubmissions =
+    idx < 0
+      ? [updated, ...db.submissions]
+      : db.submissions.map((s, i) => (i === idx ? updated : s));
   saveTeacherDb({ ...db, submissions: nextSubmissions }, { skipRemotePush: true });
   return updated;
 }
@@ -1092,7 +1094,7 @@ export function replaceSubmissionFromRemote(
  * 값을 호출자가 전달한다. 서버에서도 students/shares 시트와 다시 대조한다.
  */
 export function updateSubmissionAndPushPartial(
-  submissionId: string,
+  current: Submission,
   patch: Partial<Submission>,
   auth: {
     spreadsheetId: string;
@@ -1102,16 +1104,18 @@ export function updateSubmissionAndPushPartial(
   },
 ): Submission {
   setActiveSpreadsheetId(auth.spreadsheetId);
+  // supabase 모드에서는 write 페이지 mount가 state.submission을
+  // createBlankSubmission으로 메모리에만 만들 수 있어, 첫 저장 시점에는
+  // localStorage에 그 id가 아직 없다. 호출자가 넘긴 current를 base로 삼아
+  // 없으면 insert, 있으면 update — partial endpoint가 같은 id로 supabase에
+  // upsert하면서 동기화된다.
   const db = loadTeacherDb();
-  const idx = db.submissions.findIndex((s) => s.id === submissionId);
-  if (idx < 0) throw new Error("submission not found");
-  const updated = {
-    ...db.submissions[idx]!,
-    ...patch,
-    updatedAt: Date.now(),
-  };
-  const nextSubmissions = [...db.submissions];
-  nextSubmissions[idx] = updated;
+  const updated: Submission = { ...current, ...patch, updatedAt: Date.now() };
+  const idx = db.submissions.findIndex((s) => s.id === current.id);
+  const nextSubmissions =
+    idx < 0
+      ? [updated, ...db.submissions]
+      : db.submissions.map((s, i) => (i === idx ? updated : s));
   // localStorage는 정상적으로 갱신하되 풀-DB push는 막는다(partial endpoint가 대신 처리).
   saveTeacherDb(
     { ...db, submissions: nextSubmissions },

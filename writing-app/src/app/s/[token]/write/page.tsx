@@ -477,7 +477,7 @@ export default function WritePage() {
           // graspData는 patch에 포함시켜야 시트의 옛 청크가 새 값으로 덮인다.
           const patch: Partial<Submission> = {};
           if (localSubAtMount.graspData) patch.graspData = localSubAtMount.graspData;
-          updateSubmissionAndPushPartial(submissionId, patch, studentAuth);
+          updateSubmissionAndPushPartial(localSubAtMount, patch, studentAuth);
           await flushPendingPartialPush(studentAuth.spreadsheetId, submissionId);
           setRecoveryNotice({ kind: "uploaded" });
           bumpDb();
@@ -731,7 +731,7 @@ export default function WritePage() {
           stage === "outline" ? { outlineText: text } :
           stage === "draft" ? { draftText: text } :
           { reviseText: text };
-        updateSubmissionLocalOnly(state.submission.id, patch);
+        updateSubmissionLocalOnly(state.submission, patch);
         bumpDb();
       } catch { /* ignore */ }
     }, 120);
@@ -752,7 +752,7 @@ export default function WritePage() {
     }
     const patch = { outlineText, draftText, reviseText };
     if (studentAuth) {
-      updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
+      updateSubmissionAndPushPartial(state.submission, patch, studentAuth);
       await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
     } else {
       // Supabase 모드에서 studentAuth가 없으면 풀 db push가 다른 학생들의 마스킹된
@@ -797,7 +797,7 @@ export default function WritePage() {
     setShowGraspForm(false);
     const patch = { graspData: JSON.stringify(grasp) };
     if (studentAuth) {
-      updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
+      updateSubmissionAndPushPartial(state.submission, patch, studentAuth);
     } else {
       if (isUsingSupabase) {
         setError(
@@ -933,7 +933,7 @@ export default function WritePage() {
       // 본문 + 제출 시각을 단일 push에 묶고, 시트 반영이 끝날 때까지 대기.
       // 실패 시 throw → "제출 완료" 모달이 뜨지 않으므로 데이터 손실 인지 가능.
       if (studentAuth) {
-        updateSubmissionAndPushPartial(state.submission.id, patch, studentAuth);
+        updateSubmissionAndPushPartial(state.submission, patch, studentAuth);
         await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
       } else {
         // Supabase 모드에서 studentAuth 없으면 풀 db push가 다른 학생 본문을 망가뜨림.
