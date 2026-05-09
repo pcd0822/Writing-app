@@ -750,9 +750,26 @@ export default function WritePage() {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const patch = { outlineText, draftText, reviseText };
+    const patch: Partial<Submission> = { outlineText, draftText, reviseText };
+    // 승인된 단계를 학생이 "수정하기 → 저장"으로 다시 손볼 때, 그 단계의 승인을
+    // 해제해 교사가 다시 검토·재승인하도록 강제. 서버 측 teacher-only 필드 보호를
+    // 우회하기 위해 clearApprovedStages 신호도 함께 전송한다(local patch만으로는
+    // 보호 로직이 supabase의 옛 approvedAt을 그대로 보존해버림).
+    const clearStages: Array<"outline" | "draft" | "revise"> = [];
+    if (
+      stageEditUnlocked[tab] &&
+      stageApproved(state.submission, tab) &&
+      (tab === "outline" || tab === "draft" || tab === "revise")
+    ) {
+      if (tab === "outline") patch.outlineApprovedAt = null;
+      else if (tab === "draft") patch.draftApprovedAt = null;
+      else patch.reviseApprovedAt = null;
+      clearStages.push(tab);
+    }
     if (studentAuth) {
-      updateSubmissionAndPushPartial(state.submission, patch, studentAuth);
+      updateSubmissionAndPushPartial(state.submission, patch, studentAuth, {
+        clearApprovedStages: clearStages.length > 0 ? clearStages : undefined,
+      });
       await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
     } else {
       // Supabase 모드에서 studentAuth가 없으면 풀 db push가 다른 학생들의 마스킹된
@@ -874,6 +891,9 @@ export default function WritePage() {
   function editorLocked(stage: Stage) {
     if (!state.ok) return true;
     const s = state.submission;
+    // 최종 승인이 떨어진 후에는 모든 단계를 read-only로 잠근다. 교사가 "최종 배포
+    // 취소" / "고쳐쓰기 승인 취소"로 finalApprovedAt을 풀어야 다시 편집 가능.
+    if (s.finalApprovedAt) return true;
     // 승인된 단계라도 수정하기를 누르면 편집 가능
     if (stageApproved(s, stage)) return !stageEditUnlocked[stage];
     const sub = stageSubmitted(s, stage);
@@ -930,10 +950,17 @@ export default function WritePage() {
           reviseApprovedAt: null,
         };
       })();
+      // 승인된 단계를 학생이 "수정하기 → 제출"로 재제출하면, 그 단계 승인은
+      // 서버에서도 명시적으로 해제돼야 한다. patch에 outlineApprovedAt: null 등을
+      // 넣었지만 서버 측 teacher-only 필드 보호가 supabase 기존 값을 그대로 되돌리
+      // 므로, clearApprovedStages 신호도 함께 보낸다.
+      const wasApproved = stageApproved(state.submission, stage);
       // 본문 + 제출 시각을 단일 push에 묶고, 시트 반영이 끝날 때까지 대기.
       // 실패 시 throw → "제출 완료" 모달이 뜨지 않으므로 데이터 손실 인지 가능.
       if (studentAuth) {
-        updateSubmissionAndPushPartial(state.submission, patch, studentAuth);
+        updateSubmissionAndPushPartial(state.submission, patch, studentAuth, {
+          clearApprovedStages: wasApproved ? [stage] : undefined,
+        });
         await flushPendingPartialPush(studentAuth.spreadsheetId, state.submission.id);
       } else {
         // Supabase 모드에서 studentAuth 없으면 풀 db push가 다른 학생 본문을 망가뜨림.
@@ -969,6 +996,8 @@ export default function WritePage() {
   function canShowSubmit(stage: Stage) {
     if (!state.ok) return false;
     const s = state.submission;
+    // 최종 승인 후엔 저장/제출 모두 차단.
+    if (s.finalApprovedAt) return false;
     // 승인된 단계에서 수정 중이면 재제출 가능
     if (stageApproved(s, stage)) return stageEditUnlocked[stage];
     const sub = stageSubmitted(s, stage);
@@ -979,6 +1008,9 @@ export default function WritePage() {
   function canShowEdit(stage: Stage) {
     if (!state.ok) return false;
     const s = state.submission;
+    // 최종 승인 후엔 모든 단계의 "수정하기" 진입을 차단. 교사가 최종 승인 취소해야
+    // 다시 수정 가능.
+    if (s.finalApprovedAt) return false;
     const sub = stageSubmitted(s, stage) || stageApproved(s, stage);
     return sub && !stageEditUnlocked[stage];
   }
@@ -1079,7 +1111,6 @@ export default function WritePage() {
   }
 
   const spStatus = stageStatusPill(tab);
-  const approvedNow = stageApproved(state.submission, tab);
   const submitDisabled = !currentText(tab).trim() || isSubmitting || !canShowSubmit(tab);
 
   return (
@@ -1363,7 +1394,11 @@ export default function WritePage() {
               <span className={[styles.statusPill, spStatus.className].join(" ")}>{spStatus.label}</span>
             </div>
             <div className={styles.stageToolbarRight}>
-              {!approvedNow ? (
+              {/* 저장/제출 버튼은 canShowSubmit이 true일 때만 노출.
+                  승인 후 "수정하기"로 unlock된 상태도 포함하므로, 학생이 재편집한
+                  내용을 저장/재제출하는 흐름이 끊기지 않는다. 최종 승인 후엔
+                  canShowSubmit이 false가 돼 자동으로 가려진다. */}
+              {canShowSubmit(tab) ? (
                 <button
                   type="button"
                   className={styles.stepBtnSecondary}
@@ -1381,7 +1416,7 @@ export default function WritePage() {
                   )}
                 </button>
               ) : null}
-              {!approvedNow ? (
+              {canShowSubmit(tab) ? (
                 <button
                   type="button"
                   className={styles.stepBtnPrimary}

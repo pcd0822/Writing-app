@@ -308,6 +308,13 @@ export type PushSubmissionPartialPayload = {
   submission: Submission;
   /** GRASPS 맥락 설계 JSON. 변경됐을 때만 전달. 없으면 청크 기존 값 유지. */
   graspData?: string;
+  /**
+   * 학생이 "수정하기 → 저장/제출"로 이미 승인된 단계의 글을 손볼 때, 서버 측
+   * teacher-only 필드 보호 로직이 supabase의 옛 approvedAt을 그대로 보존해버리는
+   * 것을 우회하기 위한 명시적 해제 신호. 보호 적용 직후 해당 stage의 approvedAt만
+   * null로 덮어 교사가 다시 검토·재승인하는 흐름이 강제된다. 비우면 보호 그대로 동작.
+   */
+  clearApprovedStages?: Array<"outline" | "draft" | "revise">;
 };
 
 /**

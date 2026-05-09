@@ -1030,8 +1030,20 @@ export async function authenticateStudent(
 export async function upsertStudentSubmission(
   incoming: Submission,
   graspData: string | undefined,
+  clearApprovedStages?: Array<"outline" | "draft" | "revise">,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const db = getSupabaseAdmin();
+  // 학생이 "수정하기 → 저장/제출" 흐름으로 승인된 단계를 다시 손볼 때, teacher-only
+  // 필드 보호 로직 때문에 outlineApprovedAt 등이 supabase 기존 값으로 되돌아가는 것을
+  // 우회하기 위한 명시적 신호. 보호 적용 후 호출해 해당 stage의 approved_at만 null로 덮음.
+  const applyClears = (m: SupaSubmissionRow) => {
+    if (!clearApprovedStages || clearApprovedStages.length === 0) return;
+    for (const stage of clearApprovedStages) {
+      if (stage === "outline") m.outline_approved_at = null;
+      else if (stage === "draft") m.draft_approved_at = null;
+      else if (stage === "revise") m.revise_approved_at = null;
+    }
+  };
 
   const { data: existingByTuple, error: tupleErr } = await db
     .from("submissions")
@@ -1063,6 +1075,8 @@ export async function upsertStudentSubmission(
       merged.final_report_snapshot =
         (existingByTuple.final_report_snapshot as string) ?? "";
     }
+    // 학생의 "승인 후 수정 저장" 명시 의도 적용 — 보호 직후 덮어 빈 결과로 보냄.
+    applyClears(merged);
   }
 
   // graspData: undefined = "no change" → keep DB value; "" or non-empty =
@@ -1154,6 +1168,8 @@ export async function upsertStudentSubmission(
       if (graspData === undefined) {
         merged.grasp_data = (raceRow.grasp_data as string) ?? "";
       }
+      // race-recovery 경로에서도 학생의 명시적 승인 해제 의도를 동일하게 반영.
+      applyClears(merged);
 
       const targetId = raceRow.id as string;
       const {

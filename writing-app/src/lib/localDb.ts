@@ -1102,6 +1102,14 @@ export function updateSubmissionAndPushPartial(
     studentNo: string;
     studentCode: string;
   },
+  options?: {
+    /**
+     * 학생이 이미 승인된 단계를 "수정하기 → 저장/제출"로 다시 손볼 때, 서버 측 보호
+     * 로직을 우회해 해당 stage의 approvedAt을 null로 강제 해제하기 위한 신호.
+     * 비우면 평소처럼 teacher-only 필드 보호가 그대로 작동.
+     */
+    clearApprovedStages?: Array<"outline" | "draft" | "revise">;
+  },
 ): Submission {
   setActiveSpreadsheetId(auth.spreadsheetId);
   // supabase 모드에서는 write 페이지 mount가 state.submission을
@@ -1129,6 +1137,7 @@ export function updateSubmissionAndPushPartial(
     submission: updated,
     // graspData는 patch에 들어 있을 때만 보낸다(없으면 undefined → 서버는 청크 그대로 둠).
     graspData: patch.graspData,
+    clearApprovedStages: options?.clearApprovedStages,
   });
   return updated;
 }

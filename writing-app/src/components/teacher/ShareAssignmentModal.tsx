@@ -77,7 +77,7 @@ export function ShareAssignmentModal({
         );
         if (hasOther) {
           setInfo(
-            "다른 디바이스에서 만든 활성 공유 링크를 시트에서 가져왔습니다. 새로 만들지 말고 이 링크를 공유해주세요.",
+            "다른 디바이스에서 만든 활성 공유 링크를 서버에서 가져왔습니다. 새로 만들지 말고 이 링크를 공유해주세요.",
           );
         }
         setLocalVer((v) => v + 1);
@@ -288,7 +288,7 @@ export function ShareAssignmentModal({
 
         <div className={styles.box}>
           <div className={styles.boxTitle}>
-            현재 유효 링크{isSyncingShares ? " (시트에서 확인 중…)" : ""}
+            현재 유효 링크{isSyncingShares ? " (서버에서 확인 중…)" : ""}
           </div>
           {activeShare && shareUrl ? (
             <>

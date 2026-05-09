@@ -25,6 +25,10 @@ const BodySchema = z.object({
   studentCode: z.string().min(1),
   submission: SubmissionSchema,
   graspData: z.string().optional(),
+  // 학생이 "수정하기 → 저장/제출"로 승인된 단계를 다시 손볼 때, 서버 보호 로직이
+  // 옛 approvedAt을 되돌리지 않도록 명시적 해제 신호를 보낸다. 비어있거나 누락이면
+  // 보호가 그대로 적용 — 즉 stale payload가 우연히 승인을 지울 수 없다.
+  clearApprovedStages: z.array(z.enum(["outline", "draft", "revise"])).optional(),
 });
 
 export const handler: Handler = async (event) => {
@@ -34,7 +38,8 @@ export const handler: Handler = async (event) => {
   const parsed = parseJsonBody(event, BodySchema);
   if (!parsed.ok) return json(400, { error: parsed.error });
 
-  const { shareToken, studentNo, studentCode, submission, graspData } = parsed.data;
+  const { shareToken, studentNo, studentCode, submission, graspData, clearApprovedStages } =
+    parsed.data;
 
   // The student-supplied submission.studentNo must match the credentials.
   // Without this guard, a student with a valid (studentNo, code) could
@@ -57,7 +62,7 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const result = await upsertStudentSubmission(submission, graspData);
+    const result = await upsertStudentSubmission(submission, graspData, clearApprovedStages);
     if (!result.ok) return json(result.status, { error: result.error });
     return json(200, { ok: true });
   } catch (e) {
