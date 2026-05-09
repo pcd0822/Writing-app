@@ -681,12 +681,21 @@ export default function TeacherAssignmentPage() {
                         AI {state.aiCountBySubmissionId.get(s.id) || 0}
                         {" · "}
                         {/*
-                          학생이 진행한 가장 마지막 단계의 본문 글자수(공백 포함)를 표시.
-                          이전엔 outline+draft+revise를 모두 합쳐 공백 제거 후 길이를
-                          썼는데, 같은 글이 단계 흐름으로 발전한 것이라 합산은 사실상
-                          중복 카운트가 되어 학생 화면 글자수와 어긋났다.
+                          학생이 마지막으로 작성한 단계의 본문 글자수(공백 포함, 학생
+                          화면 statsBar의 charsWithSpaces와 동일 식)를 단계 라벨과 함께
+                          표시. outline+draft+revise는 같은 글이 발전한 것이라 합산하면
+                          중복 카운트가 되므로 단일 단계 값만. 라벨을 붙여 사용자가
+                          합산으로 오해하지 않도록 명시.
                         */}
-                        {(s.reviseText || s.draftText || s.outlineText).length}자
+                        {(() => {
+                          const reviseLen = (s.reviseText ?? "").length;
+                          const draftLen = (s.draftText ?? "").length;
+                          const outlineLen = (s.outlineText ?? "").length;
+                          if (reviseLen > 0) return `고쳐쓰기 ${reviseLen}자`;
+                          if (draftLen > 0) return `초고 ${draftLen}자`;
+                          if (outlineLen > 0) return `개요 ${outlineLen}자`;
+                          return "0자";
+                        })()}
                       </div>
                     </button>
                   ))}

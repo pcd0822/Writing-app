@@ -43,7 +43,10 @@ const KEY = "writing-app:teacherDb:v1";
  * 함께 사라질 수 있다. 적용 시점은 학생들의 미저장 분량이 적은 때(수업 외)를
  * 권장. 정리 후 mount-once supabase pull(Phase 5b/6)이 fresh 데이터를 채운다.
  */
-const LOCAL_RESET_TIMESTAMP_MS = Date.UTC(2026, 4, 8, 0, 0, 0); // 2026-05-08T00:00:00Z
+// 2026-05-09 갱신: 학생 디바이스의 localStorage 화면 영향 격리 정책으로 한 번 더
+// 모든 기기를 일괄 정리. 이전 timestamp(2026-05-08) 이후 새로 작성된 캐시까지도
+// 다음 mount 시 비우고 supabase 응답으로 새로 채운다.
+const LOCAL_RESET_TIMESTAMP_MS = Date.UTC(2026, 4, 9, 12, 0, 0); // 2026-05-09T12:00:00Z
 const LOCAL_RESET_MARKER_KEY = "writing-app:localResetAt";
 
 /** mount 진입점에서 한 번만 호출되도록 메모이즈. */
@@ -797,6 +800,46 @@ export async function mergeRemoteSharesFromSheet(
 
 export function createSubmissionId() {
   return nanoid(14);
+}
+
+/**
+ * 메모리에서만 빈 submission 객체를 만든다 — localStorage를 일절 건드리지 않음.
+ * Supabase 모드의 학생 write 페이지 mount 시점에서 사용. 학생 화면이 가지는
+ * 데이터의 출처를 supabase로 일원화하기 위해 도입했다. 학생이 "저장하기"를
+ * 누르면 partial endpoint가 이 빈 객체를 supabase에 insert하면서 동일 id로
+ * 동기화된다.
+ */
+export function createBlankSubmission(params: {
+  assignmentId: string;
+  classId: string;
+  studentNo: string;
+}): Submission {
+  const now = Date.now();
+  return {
+    id: createSubmissionId(),
+    assignmentId: params.assignmentId,
+    classId: params.classId,
+    studentNo: params.studentNo,
+    createdAt: now,
+    updatedAt: now,
+    outlineText: "",
+    draftText: "",
+    reviseText: "",
+    outlineSubmittedAt: null,
+    draftSubmittedAt: null,
+    reviseSubmittedAt: null,
+    outlineApprovedAt: null,
+    draftApprovedAt: null,
+    reviseApprovedAt: null,
+    finalApprovedAt: null,
+    finalReportPublishedAt: null,
+    finalReportSnapshot: "",
+    graspData: "",
+    outlineRejectReason: "",
+    draftRejectReason: "",
+    reviseRejectReason: "",
+    currentStep: 1,
+  };
 }
 
 export function getOrCreateSubmission(params: {

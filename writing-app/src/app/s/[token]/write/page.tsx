@@ -17,6 +17,7 @@ import { callFunction } from "@/lib/netlifyClient";
 import { nanoid } from "nanoid";
 import {
   addStepTransition,
+  createBlankSubmission,
   findShare,
   getGraspData,
   getOrCreateSubmission,
@@ -201,10 +202,11 @@ export default function WritePage() {
           if (!cancelled) setState({ ok: false, reason: "student" });
           return;
         }
-        // 자기 submission이 db에 있으면 그것을 그대로 사용. 없으면
-        // getOrCreateSubmission이 빈 submission을 localStorage에 만들고 반환 —
-        // 이는 학생이 입력 중인 글의 임시 cache로만 쓰이고, 실제 truth는
-        // "저장하기" 클릭 시 partial push로 supabase에 동일 id로 들어간다.
+        // 자기 submission이 db에 있으면 그것을 그대로 사용. 없으면 메모리에서만
+        // 빈 submission을 만들어 화면 초기 상태로 둔다 — localStorage를 건드리지
+        // 않으므로 학생 디바이스의 잔재 데이터가 화면에 영향을 줄 수 없다.
+        // 학생이 "저장하기"를 누르면 partial endpoint가 이 객체를 supabase에 동일
+        // id로 insert하면서 자연스럽게 동기화된다.
         const existing = db.submissions.find(
           (s) =>
             s.assignmentId === assignment.id &&
@@ -213,11 +215,11 @@ export default function WritePage() {
         );
         const submission =
           existing ??
-          getOrCreateSubmission({
+          createBlankSubmission({
             assignmentId: assignment.id,
             classId: cls.id,
             studentNo,
-          }).submission;
+          });
 
         const notes = db.feedbackNotes
           .filter((n) => n.submissionId === submission.id && !n.resolvedAt)
@@ -302,13 +304,11 @@ export default function WritePage() {
           return;
         } catch (e) {
           if (cancelled) return;
-          console.warn(
-            "[Writing app] supabase pull failed; falling back to local cache:",
-            e,
-          );
-          // 네트워크 단절 등 일시 실패 시에만 localStorage cache로 마지막 화면을
-          // 유지. 다음 dbBump(저장/제출/단계 전환 등)에서 다시 supabase fetch 시도.
-          fillStateFromDb(loadTeacherDb());
+          console.error("[Writing app] supabase pull failed:", e);
+          // 정책: 학생 화면의 출처를 supabase로 일원화. 네트워크 실패 시 localStorage
+          // cache로 fallback하지 않고 명시적 에러 상태로 전환해, 잔재 데이터가 화면에
+          // 보이는 가능성을 원천 차단. 학생은 새로고침으로 재시도할 수 있다.
+          setState({ ok: false, reason: "error" });
           return;
         }
       }

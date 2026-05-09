@@ -1055,7 +1055,79 @@ export async function upsertStudentSubmission(
     }
   } else {
     const { error: insErr } = await db.from("submissions").insert(merged as never);
-    if (insErr) return { ok: false, status: 500, error: insErr.message };
+    if (insErr) {
+      // 23505 = unique_violation. 두 디바이스가 같은 (a,c,s)로 거의 동시에
+      // partial push를 보내면, 둘 다 SELECT에서 nothing → 둘 다 INSERT 시도하는
+      // race가 가능하다. 한 쪽은 unique 인덱스에 걸려 fail. 이 케이스를 빈
+      // 화면이나 데이터 손실로 보내지 않도록, 다시 SELECT해서 row id를 잡고
+      // UPDATE로 회복한다.
+      const isUniqueViolation =
+        (insErr as { code?: string }).code === "23505" ||
+        /duplicate key value/i.test(insErr.message ?? "");
+      if (!isUniqueViolation) {
+        return { ok: false, status: 500, error: insErr.message };
+      }
+
+      const { data: raceRow, error: raceErr } = await db
+        .from("submissions")
+        .select(
+          "id, outline_approved_at, draft_approved_at, revise_approved_at, final_approved_at, final_report_published_at, outline_reject_reason, draft_reject_reason, revise_reject_reason, final_report_snapshot, grasp_data",
+        )
+        .eq("assignment_id", incoming.assignmentId)
+        .eq("class_id", incoming.classId)
+        .eq("student_no", incoming.studentNo)
+        .maybeSingle();
+      if (raceErr || !raceRow) {
+        return {
+          ok: false,
+          status: 500,
+          error: `submission insert race recovery failed: ${
+            raceErr?.message ?? "row not found"
+          }`,
+        };
+      }
+
+      // 동일한 teacher-only 필드 보호 + UPDATE 경로 재실행.
+      merged.outline_approved_at = (raceRow.outline_approved_at as number | null) ?? null;
+      merged.draft_approved_at = (raceRow.draft_approved_at as number | null) ?? null;
+      merged.revise_approved_at = (raceRow.revise_approved_at as number | null) ?? null;
+      merged.final_approved_at = (raceRow.final_approved_at as number | null) ?? null;
+      merged.final_report_published_at =
+        (raceRow.final_report_published_at as number | null) ?? null;
+      merged.outline_reject_reason = (raceRow.outline_reject_reason as string) ?? "";
+      merged.draft_reject_reason = (raceRow.draft_reject_reason as string) ?? "";
+      merged.revise_reject_reason = (raceRow.revise_reject_reason as string) ?? "";
+      if (!incoming.finalReportSnapshot) {
+        merged.final_report_snapshot =
+          (raceRow.final_report_snapshot as string) ?? "";
+      }
+      if (graspData === undefined) {
+        merged.grasp_data = (raceRow.grasp_data as string) ?? "";
+      }
+
+      const targetId = raceRow.id as string;
+      const {
+        id: _id2,
+        assignment_id: _aid2,
+        class_id: _cid2,
+        student_no: _sno2,
+        ...retryFields
+      } = merged;
+      void _id2; void _aid2; void _cid2; void _sno2;
+      const { data: retryRows, error: retryErr } = await db
+        .from("submissions")
+        .update(retryFields)
+        .eq("id", targetId)
+        .select("id");
+      if (retryErr) return { ok: false, status: 500, error: retryErr.message };
+      if (!retryRows || retryRows.length === 0) {
+        return {
+          ok: false,
+          status: 500,
+          error: `submission race retry touched 0 rows (id=${targetId})`,
+        };
+      }
+    }
   }
 
   return { ok: true };

@@ -81,8 +81,8 @@ export function MigrateToSupabaseModal({ isOpen, onClose, spreadsheetId }: Props
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="🚚 Supabase로 이전"
-      description="현재 연결된 시트의 모든 데이터를 Supabase 데이터베이스로 복사합니다."
+      title="🚚 Supabase로 이전 (일회성)"
+      description="시트에 있던 기존 데이터를 Supabase로 한 번만 옮기는 작업입니다. 이전 후에는 학생/교사가 새로 작성하는 모든 데이터가 자동으로 Supabase에 저장됩니다."
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={running}>
@@ -95,9 +95,15 @@ export function MigrateToSupabaseModal({ isOpen, onClose, spreadsheetId }: Props
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>
-          여러 번 눌러도 안전합니다(같은 ID는 덮어쓰기). 시트 데이터는 그대로 보존됩니다.
-        </p>
+        <div style={{ ...box, background: "#e7f5ff", color: "#0b3d66" }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>📌 한 번만 누르세요</div>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
+            <li>매 과제 시작 때마다 누를 필요 없습니다.</li>
+            <li>새 디바이스에서 접속할 때도 누를 필요 없습니다.</li>
+            <li>이전 후에는 학생이 작성한 모든 글이 자동으로 Supabase에 저장됩니다.</li>
+            <li>여러 번 눌러도 같은 ID는 덮어쓰기라 안전합니다(시트 데이터도 보존).</li>
+          </ul>
+        </div>
         {spreadsheetId ? (
           <p style={{ fontSize: 13, color: "#666", margin: 0 }}>
             시트 ID: <code>{spreadsheetId.slice(0, 12)}…</code>
