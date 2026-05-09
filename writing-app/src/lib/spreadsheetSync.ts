@@ -27,6 +27,23 @@ async function teacherAuthOptions(): Promise<{ authToken: string }> {
   return { authToken: token };
 }
 
+/**
+ * 현재 페이지가 학생 share 페이지(`/s/<token>` 또는 `/s/<token>/write`)인지.
+ * supabase 모드에서 풀-DB push가 학생 디바이스에서 절대 일어나지 못하게 하는
+ * 안전망. localStorage가 share-bootstrap 응답으로 마스킹된 다른 학생들의 빈
+ * 본문을 갖고 있을 때, 그 디바이스에서 어떤 코드 경로로든 풀-DB push가 발동되면
+ * supabase의 다른 학생들 본문까지 빈 string으로 덮이는 사고가 반복돼 path
+ * 단계에서 막는다.
+ */
+function isStudentPage(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.location.pathname.startsWith("/s/");
+  } catch {
+    return false;
+  }
+}
+
 const ACTIVE_SID_KEY = "writing-app:activeSpreadsheetId";
 
 export function setActiveSpreadsheetId(spreadsheetId: string) {
@@ -147,16 +164,19 @@ export async function pushDbToSheet(
   }
   const payload = prepareDbForSheetPush(toPush);
   if (USE_SUPABASE) {
-    // 학생 디바이스 push 차단:
-    // share-bootstrap 응답의 db는 다른 학생들의 본문이 빈 string으로 마스킹된
-    // 상태로 학생 localStorage에 들어가 있다. 이걸 supabase-db-set이 upsert하면
-    // 같은 학급의 다른 학생들 본문이 모두 빈 글로 덮어쓰여진다(실제 사고 발생).
-    // 학생 변경은 반드시 partial endpoint(supabase-db-set-submission)로만 흘러야
-    // 한다. saveTeacherDb는 학생 path에서 studentPush:true를 줘 skipPullMerge:true
-    // 옵션이 코얼레싱에 전달되므로, 이 플래그를 학생 디바이스의 fingerprint로 사용.
-    if (options?.skipPullMerge === true) {
+    // 풀-DB push 차단 가드:
+    // 1) skipPullMerge=true: saveTeacherDb가 studentPush 옵션과 함께 호출된
+    //    학생 path. 명시적으로 학생 흐름임을 알린 케이스.
+    // 2) isStudentPage(): URL이 /s/로 시작하는 모든 페이지. 위 1)을 잊은
+    //    helper(예: 옵션 누락된 saveTeacherDb 호출)가 있어도 학생 페이지라면
+    //    절대 풀-DB push가 일어나지 않도록 한 path 기반 안전망.
+    //
+    // share-bootstrap 응답의 localStorage는 다른 학생 본문이 빈 string으로
+    // 마스킹된 상태이므로, 학생 디바이스에서 풀-DB push가 발동하면 같은 학급
+    // 다른 학생들 본문이 모두 빈 글로 덮어쓰여진다(반복 발생한 사고).
+    if (options?.skipPullMerge === true || isStudentPage()) {
       console.warn(
-        "[Writing app] supabase mode: blocked full-db push from student-context to prevent masked-bodies overwrite.",
+        "[Writing app] supabase mode: blocked full-db push from student page/context.",
       );
       return toPush;
     }
