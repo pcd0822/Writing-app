@@ -16,8 +16,11 @@ import {
 } from "@/lib/localDb";
 import {
   deleteRemoteEntity,
+  flushPendingPush,
+  getActiveSpreadsheetId,
   isUsingSupabase,
   pullDbFromSheetWithRetry,
+  pushDbToSheet,
 } from "@/lib/spreadsheetSync";
 import { nanoid } from "nanoid";
 import type {
@@ -86,6 +89,9 @@ export default function TeacherAssignmentPage() {
   const [draftPart, setDraftPart] = useState<number | "">("");
   const [revisePart, setRevisePart] = useState<number | "">("");
   const [error, setError] = useState<string | null>(null);
+  // 승인/승인취소 처리 중인 (subId, op, stage) 키. 같은 버튼이 두 번 눌리는 것을 막고
+  // 버튼에 진행 표시를 보여주기 위해 사용. flushPendingPush가 끝나면 null로 복귀.
+  const [pendingApprovalKey, setPendingApprovalKey] = useState<string | null>(null);
   const [dbBump, setDbBump] = useState(0);
   const [dropQuote, setDropQuote] = useState<string | null>(null);
   const [pendingRange, setPendingRange] = useState<{ start: number; end: number } | null>(null);
@@ -273,27 +279,78 @@ export default function TeacherAssignmentPage() {
     return "미제출";
   }
 
-  function approveStage(subId: string, stage: Stage) {
+  async function approveStage(subId: string, stage: Stage) {
+    if (pendingApprovalKey) return;
     setError(null);
     const db = loadTeacherDb();
     const sub = db.submissions.find((s) => s.id === subId);
-    if (!sub) return;
+    if (!sub) {
+      // 폴링이 supabase 응답으로 localStorage를 덮으면서 selectedSubmissionId가
+      // stale이 됐을 가능성. 사용자에게 새로고침을 요청한다 (silent return은
+      // "아무 일도 안 일어남"으로 보여 디버깅 불가).
+      const msg = "선택된 학생 제출물을 찾을 수 없습니다. 페이지를 새로고침한 후 다시 시도해주세요.";
+      setError(msg);
+      window.alert(msg);
+      return;
+    }
 
     if (stage === "draft") {
       const hasAnyNote = db.feedbackNotes.some(
         (n) => n.submissionId === subId && (n.stage === "draft" || n.stage === "revise") && !n.resolvedAt,
       );
       if (!hasAnyNote) {
-        setError("초고 승인 전, 반드시 피드백(메모)을 1개 이상 입력해야 합니다.");
+        // setError 만으로는 페이지 하단에 표시돼 교사가 놓칠 수 있어 alert 병행.
+        const msg = "초고 승인 전, 초고/고쳐쓰기 단계에서 피드백(메모)을 1개 이상 입력해야 합니다.";
+        setError(msg);
+        window.alert(msg);
         return;
       }
     }
 
-    // 승인 시 거부 사유 초기화
-    if (stage === "outline") updateSubmission(subId, { outlineApprovedAt: Date.now(), outlineRejectReason: "" });
-    if (stage === "draft") updateSubmission(subId, { draftApprovedAt: Date.now(), draftRejectReason: "" });
-    if (stage === "revise") updateSubmission(subId, { reviseApprovedAt: Date.now(), reviseRejectReason: "", finalApprovedAt: Date.now() });
-    bump();
+    setPendingApprovalKey(`${subId}::approve::${stage}`);
+    try {
+      const patch: Partial<Submission> =
+        stage === "outline"
+          ? { outlineApprovedAt: Date.now(), outlineRejectReason: "" }
+          : stage === "draft"
+            ? { draftApprovedAt: Date.now(), draftRejectReason: "" }
+            : { reviseApprovedAt: Date.now(), reviseRejectReason: "", finalApprovedAt: Date.now() };
+
+      const updated: Submission = { ...sub, ...patch, updatedAt: Date.now() };
+      const nextDb: TeacherDb = {
+        ...db,
+        submissions: db.submissions.map((s) => (s.id === subId ? updated : s)),
+      };
+
+      const sid = getActiveSpreadsheetId();
+      if (sid) {
+        // 먼저 큐잉돼 있을 수 있는 옛 코얼레싱 push를 비운다 — 그 push의 stale db가
+        // 우리 승인 직후에 firing되며 supabase의 approvedAt을 null로 되돌리는 것을 방지.
+        await flushPendingPush(sid);
+        try {
+          // 코얼레싱(800ms 지연 + 에러 silent swallow)이 아닌 직접 push로 await.
+          // 실패 시 throw → catch에서 사용자에게 visible feedback.
+          await pushDbToSheet(sid, nextDb);
+          // push 성공 후에야 localStorage 갱신. 실패 시 local에 fake "승인완료"를
+          // 남겨놨다 8초 폴링이 supabase 옛값으로 덮어 사라지는 사고를 차단.
+          saveTeacherDb(nextDb, { skipRemotePush: true });
+          bump();
+        } catch (e) {
+          const errMsg = (e as Error).message || "알 수 없는 오류";
+          const userMsg =
+            `승인이 Supabase에 저장되지 않았습니다: ${errMsg}\n` +
+            `네트워크/로그인 상태 확인 후 다시 시도해주세요.`;
+          setError(userMsg);
+          window.alert(userMsg);
+        }
+      } else {
+        // sid 없는 환경(시트 미연동) — local에만 반영.
+        saveTeacherDb(nextDb, { skipRemotePush: true });
+        bump();
+      }
+    } finally {
+      setPendingApprovalKey(null);
+    }
   }
 
   function openRejectModal(stage: Stage) {
@@ -320,18 +377,47 @@ export default function TeacherAssignmentPage() {
     bump();
   }
 
-  function cancelFinalApproval(subId: string) {
+  async function cancelFinalApproval(subId: string) {
+    if (pendingApprovalKey) return;
     setError(null);
     const db = loadTeacherDb();
     const sub = db.submissions.find((s) => s.id === subId);
     if (!sub || !sub.finalApprovedAt) return;
-    updateSubmission(subId, {
-      reviseApprovedAt: null,
-      finalApprovedAt: null,
-      finalReportPublishedAt: null,
-      finalReportSnapshot: "",
-    });
-    bump();
+    setPendingApprovalKey(`${subId}::cancelFinal`);
+    try {
+      const patch: Partial<Submission> = {
+        reviseApprovedAt: null,
+        finalApprovedAt: null,
+        finalReportPublishedAt: null,
+        finalReportSnapshot: "",
+      };
+      const updated: Submission = { ...sub, ...patch, updatedAt: Date.now() };
+      const nextDb: TeacherDb = {
+        ...db,
+        submissions: db.submissions.map((s) => (s.id === subId ? updated : s)),
+      };
+      const sid = getActiveSpreadsheetId();
+      if (sid) {
+        await flushPendingPush(sid);
+        try {
+          await pushDbToSheet(sid, nextDb);
+          saveTeacherDb(nextDb, { skipRemotePush: true });
+          bump();
+        } catch (e) {
+          const errMsg = (e as Error).message || "알 수 없는 오류";
+          const userMsg =
+            `최종 배포 취소가 Supabase에 저장되지 않았습니다: ${errMsg}\n` +
+            `네트워크/로그인 상태 확인 후 다시 시도해주세요.`;
+          setError(userMsg);
+          window.alert(userMsg);
+        }
+      } else {
+        saveTeacherDb(nextDb, { skipRemotePush: true });
+        bump();
+      }
+    } finally {
+      setPendingApprovalKey(null);
+    }
   }
 
   /**
@@ -342,8 +428,17 @@ export default function TeacherAssignmentPage() {
    *  - revise 취소: revise + final 해제
    * 승인을 취소해도 학생의 제출 시각·본문은 보존된다(다시 검토 가능).
    */
-  function cancelStageApproval(subId: string, stage: Stage) {
+  async function cancelStageApproval(subId: string, stage: Stage) {
+    if (pendingApprovalKey) return;
     setError(null);
+    const db = loadTeacherDb();
+    const sub = db.submissions.find((s) => s.id === subId);
+    if (!sub) {
+      const msg = "선택된 학생 제출물을 찾을 수 없습니다. 페이지를 새로고침한 후 다시 시도해주세요.";
+      setError(msg);
+      window.alert(msg);
+      return;
+    }
     const patch: Partial<Submission> = {};
     if (stage === "outline") {
       patch.outlineApprovedAt = null;
@@ -364,8 +459,35 @@ export default function TeacherAssignmentPage() {
       patch.finalReportPublishedAt = null;
       patch.finalReportSnapshot = "";
     }
-    updateSubmission(subId, patch);
-    bump();
+    setPendingApprovalKey(`${subId}::cancel::${stage}`);
+    try {
+      const updated: Submission = { ...sub, ...patch, updatedAt: Date.now() };
+      const nextDb: TeacherDb = {
+        ...db,
+        submissions: db.submissions.map((s) => (s.id === subId ? updated : s)),
+      };
+      const sid = getActiveSpreadsheetId();
+      if (sid) {
+        await flushPendingPush(sid);
+        try {
+          await pushDbToSheet(sid, nextDb);
+          saveTeacherDb(nextDb, { skipRemotePush: true });
+          bump();
+        } catch (e) {
+          const errMsg = (e as Error).message || "알 수 없는 오류";
+          const userMsg =
+            `승인 취소가 Supabase에 저장되지 않았습니다: ${errMsg}\n` +
+            `네트워크/로그인 상태 확인 후 다시 시도해주세요.`;
+          setError(userMsg);
+          window.alert(userMsg);
+        }
+      } else {
+        saveTeacherDb(nextDb, { skipRemotePush: true });
+        bump();
+      }
+    } finally {
+      setPendingApprovalKey(null);
+    }
   }
 
   async function deleteSelectedSubmission() {
@@ -772,6 +894,8 @@ export default function TeacherAssignmentPage() {
                           const isCurrentTab = dashTab === currentStage(selected.sub);
                           // 승인 완료된 단계: '승인완료' 표시 + '승인취소' 버튼
                           if (tabApproved) {
+                            const cancelKey = `${selected.sub.id}::cancel::${tabStage}`;
+                            const isCancelling = pendingApprovalKey === cancelKey;
                             return (
                               <>
                                 <span
@@ -795,26 +919,29 @@ export default function TeacherAssignmentPage() {
                                 <button
                                   type="button"
                                   className={styles.smallBtn}
+                                  disabled={pendingApprovalKey != null}
                                   onClick={() =>
-                                    cancelStageApproval(selected.sub.id, tabStage)
+                                    void cancelStageApproval(selected.sub.id, tabStage)
                                   }
                                   title="학생이 글을 수정한 뒤 다시 피드백·승인할 수 있도록 승인을 취소합니다."
                                 >
-                                  승인취소
+                                  {isCancelling ? "취소 중…" : "승인취소"}
                                 </button>
                               </>
                             );
                           }
                           // 미승인: 승인/거부 버튼 (현재 단계에서만 활성)
+                          const approveKey = `${selected.sub.id}::approve::${tabStage}`;
+                          const isApproving = pendingApprovalKey === approveKey;
                           return (
                             <>
                               <button
                                 type="button"
                                 className={styles.approveBtn}
                                 style={{ marginLeft: 10 }}
-                                disabled={!isCurrentTab}
+                                disabled={!isCurrentTab || pendingApprovalKey != null}
                                 onClick={() =>
-                                  approveStage(selected.sub.id, tabStage)
+                                  void approveStage(selected.sub.id, tabStage)
                                 }
                                 title={
                                   !isCurrentTab
@@ -822,11 +949,13 @@ export default function TeacherAssignmentPage() {
                                     : undefined
                                 }
                               >
-                                {dashTab === "outline"
-                                  ? "개요 승인"
-                                  : dashTab === "draft"
-                                    ? "초고 승인"
-                                    : "최종 승인"}
+                                {isApproving
+                                  ? "승인 중…"
+                                  : dashTab === "outline"
+                                    ? "개요 승인"
+                                    : dashTab === "draft"
+                                      ? "초고 승인"
+                                      : "최종 승인"}
                               </button>
                               {isCurrentTab ? (
                                 <button
@@ -847,8 +976,11 @@ export default function TeacherAssignmentPage() {
                         })()}
                         {dashTab === "revise" && selected.sub.finalApprovedAt ? (
                           <button type="button" className={styles.smallBtn}
-                            onClick={() => cancelFinalApproval(selected.sub.id)}>
-                            최종 배포 취소
+                            disabled={pendingApprovalKey != null}
+                            onClick={() => void cancelFinalApproval(selected.sub.id)}>
+                            {pendingApprovalKey === `${selected.sub.id}::cancelFinal`
+                              ? "취소 중…"
+                              : "최종 배포 취소"}
                           </button>
                         ) : null}
                       </div>
