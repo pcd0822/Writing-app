@@ -27,6 +27,7 @@ import { MigrateToSupabaseModal } from "@/components/teacher/MigrateToSupabaseMo
 import { BackupToSheetModal } from "@/components/teacher/BackupToSheetModal";
 import { DriveSetupModal } from "@/components/teacher/DriveSetupModal";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
+import { acceptByEmail } from "@/lib/collaborators";
 import { CreateAssignmentModal } from "@/components/teacher/CreateAssignmentModal";
 import { ShareAssignmentModal } from "@/components/teacher/ShareAssignmentModal";
 import { StudentCodeExport } from "@/components/teacher/StudentCodeExport";
@@ -123,6 +124,14 @@ export default function TeacherPage() {
     let cancelled = false;
     void (async () => {
       try {
+        // 1) 이메일 기반 pending invite 자동 수락. 매칭이 없으면 404로 떨어지므로
+        //    조용히 무시. 수락이 성공하면 다음 pull이 owner의 데이터를 가져온다.
+        try {
+          await acceptByEmail();
+        } catch {
+          /* no pending invite — ignore */
+        }
+        if (cancelled) return;
         const result = await pullDbFromSheetWithRetry("", { attempts: 1 });
         if (cancelled || !result.db) return;
         // 머지 없이 직접 교체. supabase가 truth.

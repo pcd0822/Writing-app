@@ -5,6 +5,7 @@ import { readTeacherDbFromSpreadsheet } from "./_sheetDbReadWrite";
 import { dedupSubmissionsForMigration, writeTeacherDbForUser } from "./_supabaseDb";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // One-shot migration: read a teacher's full DB out of Google Sheets and
 // upsert it into Supabase under the verified Firebase UID. Idempotent —
@@ -33,6 +34,16 @@ export const handler: Handler = async (event) => {
 
   const parsed = parseJsonBody(event, BodySchema);
   if (!parsed.ok) return json(400, { error: parsed.error });
+
+  // 협업자는 owner의 워크스페이스에 sheet→supabase 마이그레이션을 못 하게 한다.
+  // 본인이 owner인 경우에만 진행 — owner의 데이터를 collaborator가 통째로 덮어
+  // 쓰는 사고를 막는 마지막 가드.
+  const ownerUid = await resolveDataOwnerUid(auth.teacher.uid);
+  if (ownerUid !== auth.teacher.uid) {
+    return json(403, {
+      error: "마이그레이션은 워크스페이스 소유자만 실행할 수 있습니다.",
+    });
+  }
 
   try {
     await ensureWorkbookStructure(parsed.data.spreadsheetId);

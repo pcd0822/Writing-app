@@ -3,6 +3,7 @@ import { z } from "zod";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { getSupabaseAdmin } from "./_supabase";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // Hard-delete a class / assignment / submission / share link, owned by the
 // authenticated teacher. Children cascade via FK constraints, so a single
@@ -33,7 +34,9 @@ export const handler: Handler = async (event) => {
   if (!parsed.ok) return json(400, { error: parsed.error });
 
   const { kind, id } = parsed.data;
-  const teacherUid = auth.teacher.uid;
+  // 협업자도 owner 데이터를 삭제할 수 있어야 한다(권한 동일 정책). 모든 ownership
+  // 매칭이 resolved owner uid로 통일됨. tombstone도 owner uid 파티션.
+  const teacherUid = await resolveDataOwnerUid(auth.teacher.uid);
   const db = getSupabaseAdmin();
 
   try {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { getSupabaseAdmin } from "./_supabase";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // Revoke every active share for an assignment in a single UPDATE.
 // Replaces the old "revokeAllSharesForAssignment locally → push entire
@@ -38,7 +39,9 @@ export const handler: Handler = async (event) => {
   if (!parsed.ok) return json(400, { error: parsed.error });
 
   const { assignmentId } = parsed.data;
-  const teacherUid = auth.teacher.uid;
+  // 협업자가 호출해도 owner 파티션의 share만 revoke. share-create가 owner uid로
+  // 저장하니까 이쪽도 동일 uid로 매칭해야 일관됨.
+  const teacherUid = await resolveDataOwnerUid(auth.teacher.uid);
   const db = getSupabaseAdmin();
 
   try {

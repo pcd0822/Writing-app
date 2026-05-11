@@ -2,6 +2,7 @@ import type { Handler } from "@netlify/functions";
 import { handleOptions, json } from "./_utils";
 import { readTeacherDbForUser } from "./_supabaseDb";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // Supabase counterpart of db-get.ts. Same response shape: { db: TeacherDb }.
 //
@@ -17,7 +18,10 @@ export const handler: Handler = async (event) => {
   if (!auth.ok) return json(auth.status, { error: auth.error });
 
   try {
-    const db = await readTeacherDbForUser(auth.teacher.uid);
+    // 협업자가 호출하면 owner의 uid로 라우팅. 본인 데이터만 있는 교사는
+    // resolveDataOwnerUid가 자기 uid를 그대로 돌려준다.
+    const ownerUid = await resolveDataOwnerUid(auth.teacher.uid);
+    const db = await readTeacherDbForUser(ownerUid);
     // Match db-get's "no data yet" semantics: if the teacher has nothing,
     // return db: null so the client falls back to a fresh local DB.
     const isEmpty =

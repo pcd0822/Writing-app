@@ -4,6 +4,7 @@ import { z } from "zod";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { getSupabaseAdmin } from "./_supabase";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // Create a single share_links row for an assignment the calling teacher
 // owns. Replaces the old "createShareLink locally → push entire TeacherDb"
@@ -75,7 +76,10 @@ export const handler: Handler = async (event) => {
   if (!parsed.ok) return json(400, { error: parsed.error });
 
   const { assignmentId, expiresAt, spreadsheetId } = parsed.data;
-  const teacherUid = auth.teacher.uid;
+  // share_links.teacher_uid는 항상 워크스페이스 owner의 uid를 박는다. 협업자가
+  // share를 발급해도 share-bootstrap/share-revoke가 owner 파티션에서 읽고
+  // 쓰도록 통일.
+  const teacherUid = await resolveDataOwnerUid(auth.teacher.uid);
   const db = getSupabaseAdmin();
 
   try {

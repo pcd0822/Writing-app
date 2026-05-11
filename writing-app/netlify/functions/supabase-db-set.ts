@@ -4,6 +4,7 @@ import { TeacherDbSchema } from "../../src/lib/types";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { writeTeacherDbForUser } from "./_supabaseDb";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // Supabase counterpart of db-set.ts.
 //
@@ -38,7 +39,8 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    await writeTeacherDbForUser(auth.teacher.uid, dbParsed.data);
+    const ownerUid = await resolveDataOwnerUid(auth.teacher.uid);
+    await writeTeacherDbForUser(ownerUid, dbParsed.data);
     return json(200, { ok: true });
   } catch (e) {
     return json(500, { error: (e as Error).message || "supabase-db-set failed" });

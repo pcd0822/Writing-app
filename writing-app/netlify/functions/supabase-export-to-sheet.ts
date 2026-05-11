@@ -5,6 +5,7 @@ import { writeTeacherDbToSpreadsheet } from "./_sheetDbReadWrite";
 import { readTeacherDbForUser } from "./_supabaseDb";
 import { handleOptions, json, parseJsonBody } from "./_utils";
 import { requireTeacher } from "./_firebaseAuth";
+import { resolveDataOwnerUid } from "./_collaborators";
 
 // Reverse of supabase-migrate-from-sheet: dump the teacher's current
 // Supabase DB into the named spreadsheet. This is the "manual sheet
@@ -31,7 +32,8 @@ export const handler: Handler = async (event) => {
   if (!parsed.ok) return json(400, { error: parsed.error });
 
   try {
-    const db = await readTeacherDbForUser(auth.teacher.uid);
+    const ownerUid = await resolveDataOwnerUid(auth.teacher.uid);
+    const db = await readTeacherDbForUser(ownerUid);
     const isEmpty =
       db.classes.length === 0 &&
       db.assignments.length === 0 &&
