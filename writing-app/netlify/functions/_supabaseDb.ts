@@ -664,7 +664,10 @@ export async function readTeacherDbForUser(teacherUid: string): Promise<TeacherD
 // gateway. Here we touch only what the calling student is allowed to see:
 //   * the one assignment named by the token,
 //   * classes allocated to that assignment (+ their student rows),
-//   * submissions for that assignment (bodies blanked for non-callers),
+//   * submissions for that assignment as METADATA-ONLY rows (no body
+//     columns on the wire — see SUBMISSION_META_SELECT),
+//   * the calling student's own submission body (5 columns) in a single
+//     targeted SELECT, fanned out in parallel with the children,
 //   * the calling student's own submission children (feedback / ai logs /
 //     scores / step transitions / ai interactions / teacher comments).
 //
@@ -673,14 +676,67 @@ export async function readTeacherDbForUser(teacherUid: string): Promise<TeacherD
 // union so the handler stays a thin parse/respond shim.
 // ─────────────────────────────────────────────────────────────────────────
 
-function blankSubmissionBodies(s: Submission): Submission {
+// Metadata-only column list — the 5 body columns (outline_text /
+// draft_text / revise_text / final_report_snapshot / grasp_data) are
+// excluded. Stress measurement at 30 concurrent students showed each
+// share-bootstrap response was ~95KB and p50 latency was ~5s on a class
+// of 28; the dominant cost was supabase→lambda wire transfer of every
+// student's body text just to blank it in memory before responding. We
+// now fetch metadata for everyone and the body columns only for the
+// calling student's own row (one extra SELECT below, fanned out in
+// parallel with the 6 child tables so it adds no round-trip).
+const SUBMISSION_META_SELECT =
+  "id, assignment_id, class_id, student_no, " +
+  "created_at, updated_at, " +
+  "outline_submitted_at, draft_submitted_at, revise_submitted_at, " +
+  "outline_approved_at, draft_approved_at, revise_approved_at, " +
+  "final_approved_at, final_report_published_at, " +
+  "outline_reject_reason, draft_reject_reason, revise_reject_reason, " +
+  "current_step";
+
+type SupaSubmissionMetaRow = Omit<
+  SupaSubmissionRow,
+  "outline_text" | "draft_text" | "revise_text" | "final_report_snapshot" | "grasp_data"
+>;
+
+type SupaSubmissionBodyRow = {
+  id: string;
+  outline_text: string;
+  draft_text: string;
+  revise_text: string;
+  final_report_snapshot: string;
+  grasp_data: string;
+};
+
+function rowMetaToSubmission(s: SupaSubmissionMetaRow): Submission {
+  // Body fields default to "" — matches the Submission zod schema's
+  // .default("") for outline/draft/revise/grasp/finalReportSnapshot, so
+  // a metadata-only row round-trips through the schema unchanged on the
+  // client.
   return {
-    ...s,
+    id: s.id,
+    assignmentId: s.assignment_id,
+    classId: s.class_id,
+    studentNo: s.student_no,
+    createdAt: s.created_at,
+    updatedAt: s.updated_at,
     outlineText: "",
     draftText: "",
     reviseText: "",
-    graspData: "",
+    outlineSubmittedAt: s.outline_submitted_at,
+    draftSubmittedAt: s.draft_submitted_at,
+    reviseSubmittedAt: s.revise_submitted_at,
+    outlineApprovedAt: s.outline_approved_at,
+    draftApprovedAt: s.draft_approved_at,
+    reviseApprovedAt: s.revise_approved_at,
+    finalApprovedAt: s.final_approved_at,
+    finalReportPublishedAt: s.final_report_published_at,
     finalReportSnapshot: "",
+    graspData: "",
+    outlineRejectReason: s.outline_reject_reason,
+    draftRejectReason: s.draft_reject_reason,
+    reviseRejectReason: s.revise_reject_reason,
+    currentStep: s.current_step,
   };
 }
 
@@ -754,7 +810,7 @@ export async function readStudentScopedDb(params: {
     : Promise.resolve({ data: [] as SupaStudentRow[], error: null });
   const submissionsP = db
     .from("submissions")
-    .select("*")
+    .select(SUBMISSION_META_SELECT)
     .eq("assignment_id", assignmentId);
 
   const [classesRes, studentsRes, submissionsRes] = await Promise.all([
@@ -777,7 +833,7 @@ export async function readStudentScopedDb(params: {
   }
   const classRows = (classesRes.data ?? []) as SupaClassRow[];
   const studentRows = (studentsRes.data ?? []) as SupaStudentRow[];
-  const submissionRows = (submissionsRes.data ?? []) as SupaSubmissionRow[];
+  const submissionRows = (submissionsRes.data ?? []) as SupaSubmissionMetaRow[];
 
   // 3) Resolve the calling student → class → submission. A missing or
   //    wrong credential pair silently falls through to "all bodies blanked,
@@ -798,8 +854,10 @@ export async function readStudentScopedDb(params: {
       : undefined;
   const mySubmissionId = mySubmissionRow?.id ?? null;
 
-  // 4) Six child tables, but only for the calling student's submission.
-  //    Everyone else's children stay on the server.
+  // 4) Six child tables for the calling student's submission, plus the
+  //    body row for that same submission. All fanned out in parallel so
+  //    the extra body SELECT adds no round-trip vs the previous shape.
+  //    Everyone else's children and bodies stay on the server.
   const childPromises = mySubmissionId
     ? Promise.all([
         db.from("feedback_notes").select("*").eq("submission_id", mySubmissionId),
@@ -817,8 +875,15 @@ export async function readStudentScopedDb(params: {
         { data: [], error: null },
         { data: [], error: null },
       ] as const);
-  const [feedbackRes, aiLogsRes, scoresRes, stepRes, aiInterRes, tcommentsRes] =
-    await childPromises;
+  const myBodyP = mySubmissionId
+    ? db
+        .from("submissions")
+        .select("id, outline_text, draft_text, revise_text, final_report_snapshot, grasp_data")
+        .eq("id", mySubmissionId)
+        .maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+  const [childResults, myBodyRes] = await Promise.all([childPromises, myBodyP]);
+  const [feedbackRes, aiLogsRes, scoresRes, stepRes, aiInterRes, tcommentsRes] = childResults;
   const childErrs = [
     feedbackRes.error,
     aiLogsRes.error,
@@ -826,6 +891,7 @@ export async function readStudentScopedDb(params: {
     stepRes.error,
     aiInterRes.error,
     tcommentsRes.error,
+    myBodyRes.error,
   ].filter(Boolean);
   if (childErrs.length > 0) {
     return {
@@ -835,8 +901,10 @@ export async function readStudentScopedDb(params: {
     };
   }
 
-  // 5) Assemble the TeacherDb shape. Other students' submission bodies are
-  //    blanked exactly as the previous in-memory filter did.
+  // 5) Assemble the TeacherDb shape. All submissions land as metadata-only
+  //    (bodies = ""); the calling student's own row gets its bodies
+  //    overlaid from myBodyRes. Other students' bodies were never fetched
+  //    from Supabase so there's nothing to blank.
   const studentsByClass = new Map<string, SupaStudentRow[]>();
   for (const s of studentRows) {
     const list = studentsByClass.get(s.class_id) ?? [];
@@ -844,9 +912,21 @@ export async function readStudentScopedDb(params: {
     studentsByClass.set(s.class_id, list);
   }
 
-  const submissions = submissionRows
-    .map(rowToSubmission)
-    .map((s) => (s.id === mySubmissionId ? s : blankSubmissionBodies(s)));
+  const submissions: Submission[] = submissionRows.map(rowMetaToSubmission);
+  if (mySubmissionId && myBodyRes.data) {
+    const body = myBodyRes.data as SupaSubmissionBodyRow;
+    const idx = submissions.findIndex((s) => s.id === mySubmissionId);
+    if (idx >= 0) {
+      submissions[idx] = {
+        ...submissions[idx],
+        outlineText: body.outline_text ?? "",
+        draftText: body.draft_text ?? "",
+        reviseText: body.revise_text ?? "",
+        finalReportSnapshot: body.final_report_snapshot ?? "",
+        graspData: body.grasp_data ?? "",
+      };
+    }
+  }
 
   const teacherDb: TeacherDb = {
     version: 5,
