@@ -14,8 +14,6 @@ import {
 } from "@/lib/spreadsheetSync";
 import { loadTeacherDb, mergeTeacherDbs, saveTeacherDb } from "@/lib/localDb";
 import type { TeacherDb } from "@/lib/types";
-import { CollaboratorsSection } from "./CollaboratorsSection";
-import { getFirebaseAuth } from "@/lib/firebase";
 
 type Props = {
   isOpen: boolean;
@@ -325,13 +323,6 @@ export function SpreadsheetSetupModal({ isOpen, onClose, onSaved }: Props) {
         ) : null}
 
         {error ? <div className={styles.error}>{error}</div> : null}
-
-        <CollaboratorsSection
-          selfEmail={typeof window !== "undefined"
-            ? getFirebaseAuth().currentUser?.email ?? null
-            : null}
-          onChange={onSaved}
-        />
       </div>
     </Modal>
   );

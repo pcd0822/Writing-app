@@ -33,6 +33,8 @@ import { ShareAssignmentModal } from "@/components/teacher/ShareAssignmentModal"
 import { StudentCodeExport } from "@/components/teacher/StudentCodeExport";
 import { EditAssignmentModal } from "@/components/teacher/EditAssignmentModal";
 import { Modal } from "@/components/ui/Modal";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { CollaboratorsModal } from "@/components/teacher/CollaboratorsModal";
 
 type DeleteTarget =
   | { kind: "class"; id: string; name: string; studentCount: number; submissionCount: number }
@@ -47,6 +49,7 @@ export default function TeacherPage() {
   const [isMigrateOpen, setIsMigrateOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isDriveSetupOpen, setIsDriveSetupOpen] = useState(false);
+  const [isCollabOpen, setIsCollabOpen] = useState(false);
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [shareAssignmentId, setShareAssignmentId] = useState<string | null>(null);
   const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null);
@@ -559,46 +562,47 @@ export default function TeacherPage() {
           <div className={styles.actions}>
             <button
               className={styles.tinyButton}
-              onClick={() => setIsSheetSetupOpen(true)}
-              title="구글 스프레드시트(DB) 연결"
+              onClick={() => setIsCollabOpen(true)}
+              title="다른 교사에게 이 워크스페이스 권한 부여"
             >
-              {sheetId ? "📗 DB 연결됨" : "📎 DB 연결"}
+              🤝 공동 교사 초대
             </button>
-            {sheetId ? (
-              <button
-                className={styles.tinyButton}
-                onClick={() => void syncFromSheet(false)}
-                disabled={isSyncing}
-                title="시트에서 최신 데이터를 다시 가져옵니다 (다른 디바이스에서 변경된 내용을 반영)"
-              >
-                {isSyncing ? "동기화 중…" : "🔄 시트에서 동기화"}
-              </button>
-            ) : null}
-            {sheetId ? (
-              <button
-                className={styles.tinyButton}
-                onClick={() => setIsMigrateOpen(true)}
-                title="현재 시트의 모든 데이터를 Supabase 데이터베이스로 복사합니다 (idempotent)"
-              >
-                🚚 Supabase로 이전
-              </button>
-            ) : null}
-            {sheetId ? (
-              <button
-                className={styles.tinyButton}
-                onClick={() => setIsBackupOpen(true)}
-                title="Supabase의 현재 데이터를 시트로 덤프해 백업합니다"
-              >
-                📥 시트로 백업
-              </button>
-            ) : null}
-            <button
-              className={styles.tinyButton}
-              onClick={() => setIsDriveSetupOpen(true)}
-              title="구글 드라이브에 과제 첨부 저장"
-            >
-              {driveReady ? "📁 드라이브 연결됨" : "📁 드라이브 연동"}
-            </button>
+            <Dropdown
+              label={isSyncing ? "동기화 중…" : "⚙️ 시트 · 드라이브 (구 기능)"}
+              title="구 시트/드라이브 연동 기능 모음"
+              items={[
+                {
+                  label: sheetId ? "📗 DB 연결됨" : "📎 DB 연결",
+                  title: "구글 스프레드시트(DB) 연결 설정",
+                  onSelect: () => setIsSheetSetupOpen(true),
+                },
+                {
+                  label: isSyncing ? "🔄 동기화 중…" : "🔄 시트에서 동기화",
+                  title:
+                    "시트에서 최신 데이터를 다시 가져옵니다 (다른 디바이스 변경 반영)",
+                  hidden: !sheetId,
+                  disabled: isSyncing,
+                  onSelect: () => void syncFromSheet(false),
+                },
+                {
+                  label: "🚚 Supabase로 이전",
+                  title: "현재 시트 데이터를 Supabase로 복사 (idempotent)",
+                  hidden: !sheetId,
+                  onSelect: () => setIsMigrateOpen(true),
+                },
+                {
+                  label: "📥 시트로 백업",
+                  title: "Supabase의 현재 데이터를 시트로 덤프",
+                  hidden: !sheetId,
+                  onSelect: () => setIsBackupOpen(true),
+                },
+                {
+                  label: driveReady ? "📁 드라이브 연결됨" : "📁 드라이브 연동",
+                  title: "구글 드라이브에 과제 첨부 저장",
+                  onSelect: () => setIsDriveSetupOpen(true),
+                },
+              ]}
+            />
             <button className={styles.tinyButton} onClick={onSignOut} disabled={isSigningOut}>
               {isSigningOut ? "로그아웃 중…" : "로그아웃"}
             </button>
@@ -806,6 +810,11 @@ export default function TeacherPage() {
         isOpen={isDriveSetupOpen}
         onClose={() => setIsDriveSetupOpen(false)}
         onSaved={refreshDb}
+      />
+      <CollaboratorsModal
+        isOpen={isCollabOpen}
+        onClose={() => setIsCollabOpen(false)}
+        onChange={refreshDb}
       />
       <CreateAssignmentModal
         isOpen={isCreateAssignmentOpen}
