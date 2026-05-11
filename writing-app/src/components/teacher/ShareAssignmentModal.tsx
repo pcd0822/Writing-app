@@ -15,12 +15,15 @@ import {
 } from "@/lib/localDb";
 import { loadTeacherSettings } from "@/lib/teacherSettings";
 import {
+  createShareRemote,
   flushPendingPush,
+  isUsingSupabase,
   pullDbFromSheetWithRetry,
   pushDbToSheet,
+  revokeSharesForAssignmentRemote,
   setActiveSpreadsheetId,
 } from "@/lib/spreadsheetSync";
-import type { TeacherDb } from "@/lib/types";
+import type { ShareLink, TeacherDb } from "@/lib/types";
 
 type Props = {
   isOpen: boolean;
@@ -121,6 +124,42 @@ export function ShareAssignmentModal({
       const sid = loadTeacherSettings()?.spreadsheetId;
       if (sid) setActiveSpreadsheetId(sid);
 
+      // Supabase 모드: share_links 한 행만 INSERT하는 전용 엔드포인트로 직행.
+      // 풀-DB pre-pull/push를 거치지 않으므로 학생 30명 동시 접속 중에도
+      // assignments upsert connect-error 같은 풀-DB write 실패에 영향받지 않는다.
+      // 중복 active share 보호는 서버가 담당(reused=true로 응답).
+      if (isUsingSupabase) {
+        try {
+          const result = await createShareRemote({
+            assignmentId,
+            expiresAt: minutesFromNow(m),
+            spreadsheetId: sid || undefined,
+          });
+          const baseDb = loadTeacherDb();
+          const others = baseDb.shares.filter((s) => s.token !== result.share.token);
+          const nextShares: ShareLink[] = [result.share, ...others];
+          saveTeacherDb(
+            { ...baseDb, shares: nextShares },
+            { skipRemotePush: true },
+          );
+          setLocalVer((v) => v + 1);
+          onChanged();
+          if (result.reused) {
+            setInfo(
+              `이미 활성 공유 링크가 존재합니다(만료 ${new Date(
+                result.share.expiresAt,
+              ).toLocaleString(
+                "ko-KR",
+              )}). 중복 생성을 막기 위해 이 링크를 그대로 공유해주세요. 새로 만들려면 먼저 폐기하세요.`,
+            );
+          }
+        } catch (e) {
+          console.error("[Writing app] supabase-share-create failed:", e);
+          setError("공유 링크 생성에 실패했습니다. 잠시 후 다시 시도해주세요.");
+        }
+        return;
+      }
+
       // 1) 다른 교사의 변경이 묻히지 않도록 시트에서 최신 상태를 먼저 끌어와 머지.
       //    또 진행 중인 코얼레싱 푸시가 있다면 끝낸 뒤에 pull → 우리 푸시가
       //    덮어쓸 baseline에 다른 교사의 공유가 반드시 포함되도록 한다.
@@ -195,6 +234,36 @@ export function ShareAssignmentModal({
     setIsRevoking(true);
     try {
       const sid = loadTeacherSettings()?.spreadsheetId;
+
+      // Supabase 모드: share_links 행만 UPDATE하는 전용 엔드포인트.
+      // 풀-DB upsert를 거치지 않으므로 학생 접속 부하 중에도 즉시 반영된다.
+      if (isUsingSupabase) {
+        try {
+          const result = await revokeSharesForAssignmentRemote(assignmentId);
+          const baseDb = loadTeacherDb();
+          const revokedSet = new Set(result.revokedTokens);
+          const nextShares: ShareLink[] = baseDb.shares.map((s) => {
+            // 서버가 방금 폐기한 토큰 + 우리가 모르는 사이 만료/폐기된 활성 토큰
+            // 모두 동일 시각으로 마무리. 다른 디바이스의 stale active도 함께 정리.
+            if (revokedSet.has(s.token)) return { ...s, revokedAt: result.revokedAt };
+            if (s.assignmentId === assignmentId && s.revokedAt == null) {
+              return { ...s, revokedAt: result.revokedAt };
+            }
+            return s;
+          });
+          saveTeacherDb(
+            { ...baseDb, shares: nextShares },
+            { skipRemotePush: true },
+          );
+          setLocalVer((v) => v + 1);
+          onChanged();
+        } catch (e) {
+          console.error("[Writing app] supabase-share-revoke failed:", e);
+          setError("공유 링크 폐기에 실패했습니다. 잠시 후 다시 시도해주세요.");
+        }
+        return;
+      }
+
       // 다른 교사의 신규 공유가 묻히지 않도록 폐기 직전에도 머지.
       let baseDb = loadTeacherDb();
       if (sid) {

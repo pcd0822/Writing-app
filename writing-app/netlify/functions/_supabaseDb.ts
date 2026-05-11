@@ -654,6 +654,221 @@ export async function readTeacherDbForUser(teacherUid: string): Promise<TeacherD
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Read scoped to a single share token. Used by supabase-share-bootstrap.
+//
+// Why a separate path: the previous bootstrap loaded readTeacherDbForUser
+// (13 queries pulling every class/assignment/submission/feedback_note/
+// ai_log/score/... the teacher owns) and filtered in memory. With 30
+// students hitting the share landing at once that was 30× the entire DB,
+// saturating the Supabase pool and surfacing as 502/504 from the Netlify
+// gateway. Here we touch only what the calling student is allowed to see:
+//   * the one assignment named by the token,
+//   * classes allocated to that assignment (+ their student rows),
+//   * submissions for that assignment (bodies blanked for non-callers),
+//   * the calling student's own submission children (feedback / ai logs /
+//     scores / step transitions / ai interactions / teacher comments).
+//
+// Returns the same TeacherDb shape the client merge code expects so no
+// caller changes. Status codes (404/403/500) bubble up via the result
+// union so the handler stays a thin parse/respond shim.
+// ─────────────────────────────────────────────────────────────────────────
+
+function blankSubmissionBodies(s: Submission): Submission {
+  return {
+    ...s,
+    outlineText: "",
+    draftText: "",
+    reviseText: "",
+    graspData: "",
+    finalReportSnapshot: "",
+  };
+}
+
+export type ShareScopedReadResult =
+  | { ok: true; db: TeacherDb }
+  | { ok: false; status: number; error: string };
+
+export async function readStudentScopedDb(params: {
+  shareToken: string;
+  studentNo?: string;
+  studentCode?: string;
+}): Promise<ShareScopedReadResult> {
+  const { shareToken, studentNo, studentCode } = params;
+  const db = getSupabaseAdmin();
+
+  // 0) Validate the share token. We need the row itself to pass teacher_uid
+  //    + assignment_id down to the scoped queries, so a single SELECT *
+  //    here is cheaper than a separate validate-then-read.
+  const { data: shareRow, error: shareErr } = await db
+    .from("share_links")
+    .select("*")
+    .eq("token", shareToken)
+    .maybeSingle();
+  if (shareErr) return { ok: false, status: 500, error: shareErr.message };
+  if (!shareRow) return { ok: false, status: 404, error: "유효하지 않은 공유 토큰입니다." };
+  const share = shareRow as SupaShareLinkRow;
+  if (share.revoked_at != null) {
+    return { ok: false, status: 403, error: "공유 링크가 해지되었습니다." };
+  }
+  if (typeof share.expires_at === "number" && share.expires_at < Date.now()) {
+    return { ok: false, status: 403, error: "공유 링크가 만료되었습니다." };
+  }
+
+  const assignmentId = share.assignment_id;
+  const teacherUid = share.teacher_uid;
+
+  // 1) Assignment + allocations. The .eq("teacher_uid", teacherUid) on the
+  //    assignment is defence-in-depth: if a corrupted share row ever
+  //    referenced another teacher's assignment, the join refuses it.
+  const [assignmentRes, allocationsRes] = await Promise.all([
+    db
+      .from("assignments")
+      .select("*")
+      .eq("id", assignmentId)
+      .eq("teacher_uid", teacherUid)
+      .maybeSingle(),
+    db.from("assignment_allocations").select("*").eq("assignment_id", assignmentId),
+  ]);
+  if (assignmentRes.error) {
+    return { ok: false, status: 500, error: `assignment read: ${assignmentRes.error.message}` };
+  }
+  if (allocationsRes.error) {
+    return {
+      ok: false,
+      status: 500,
+      error: `allocations read: ${allocationsRes.error.message}`,
+    };
+  }
+  const assignmentRow = assignmentRes.data as SupaAssignmentRow | null;
+  const allocationRows = (allocationsRes.data ?? []) as SupaAllocationRow[];
+  const allocClassIds = Array.from(new Set(allocationRows.map((a) => a.class_id)));
+
+  // 2) Classes / students / submissions narrowed to this assignment.
+  //    Empty IN(...) is invalid in PostgREST so guard the class-scoped
+  //    queries when there are no allocations yet.
+  const classesP = allocClassIds.length
+    ? db.from("classes").select("*").in("id", allocClassIds).eq("teacher_uid", teacherUid)
+    : Promise.resolve({ data: [] as SupaClassRow[], error: null });
+  const studentsP = allocClassIds.length
+    ? db.from("students").select("*").in("class_id", allocClassIds)
+    : Promise.resolve({ data: [] as SupaStudentRow[], error: null });
+  const submissionsP = db
+    .from("submissions")
+    .select("*")
+    .eq("assignment_id", assignmentId);
+
+  const [classesRes, studentsRes, submissionsRes] = await Promise.all([
+    classesP,
+    studentsP,
+    submissionsP,
+  ]);
+  if (classesRes.error) {
+    return { ok: false, status: 500, error: `classes read: ${classesRes.error.message}` };
+  }
+  if (studentsRes.error) {
+    return { ok: false, status: 500, error: `students read: ${studentsRes.error.message}` };
+  }
+  if (submissionsRes.error) {
+    return {
+      ok: false,
+      status: 500,
+      error: `submissions read: ${submissionsRes.error.message}`,
+    };
+  }
+  const classRows = (classesRes.data ?? []) as SupaClassRow[];
+  const studentRows = (studentsRes.data ?? []) as SupaStudentRow[];
+  const submissionRows = (submissionsRes.data ?? []) as SupaSubmissionRow[];
+
+  // 3) Resolve the calling student → class → submission. A missing or
+  //    wrong credential pair silently falls through to "all bodies blanked,
+  //    no children" so callers can't distinguish wrong-code from no-code
+  //    by inspecting the response shape.
+  let myClassId: string | null = null;
+  if (studentNo && studentCode) {
+    const found = studentRows.find(
+      (s) => s.student_no === studentNo && s.student_code === studentCode,
+    );
+    if (found) myClassId = found.class_id;
+  }
+  const mySubmissionRow =
+    myClassId && studentNo
+      ? submissionRows.find(
+          (s) => s.class_id === myClassId && s.student_no === studentNo,
+        )
+      : undefined;
+  const mySubmissionId = mySubmissionRow?.id ?? null;
+
+  // 4) Six child tables, but only for the calling student's submission.
+  //    Everyone else's children stay on the server.
+  const childPromises = mySubmissionId
+    ? Promise.all([
+        db.from("feedback_notes").select("*").eq("submission_id", mySubmissionId),
+        db.from("ai_logs").select("*").eq("submission_id", mySubmissionId),
+        db.from("scores").select("*").eq("submission_id", mySubmissionId),
+        db.from("step_transitions").select("*").eq("submission_id", mySubmissionId),
+        db.from("ai_interactions").select("*").eq("submission_id", mySubmissionId),
+        db.from("teacher_comments").select("*").eq("submission_id", mySubmissionId),
+      ])
+    : Promise.resolve([
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+      ] as const);
+  const [feedbackRes, aiLogsRes, scoresRes, stepRes, aiInterRes, tcommentsRes] =
+    await childPromises;
+  const childErrs = [
+    feedbackRes.error,
+    aiLogsRes.error,
+    scoresRes.error,
+    stepRes.error,
+    aiInterRes.error,
+    tcommentsRes.error,
+  ].filter(Boolean);
+  if (childErrs.length > 0) {
+    return {
+      ok: false,
+      status: 500,
+      error: childErrs.map((e) => e!.message).join("; "),
+    };
+  }
+
+  // 5) Assemble the TeacherDb shape. Other students' submission bodies are
+  //    blanked exactly as the previous in-memory filter did.
+  const studentsByClass = new Map<string, SupaStudentRow[]>();
+  for (const s of studentRows) {
+    const list = studentsByClass.get(s.class_id) ?? [];
+    list.push(s);
+    studentsByClass.set(s.class_id, list);
+  }
+
+  const submissions = submissionRows
+    .map(rowToSubmission)
+    .map((s) => (s.id === mySubmissionId ? s : blankSubmissionBodies(s)));
+
+  const teacherDb: TeacherDb = {
+    version: 5,
+    classes: classRows.map((c) => rowToClass(c, studentsByClass.get(c.id) ?? [])),
+    assignments: assignmentRow ? [rowToAssignment(assignmentRow)] : [],
+    allocations: allocationsFromRows(allocationRows),
+    shares: [rowToShareLink(share)],
+    submissions,
+    feedbackNotes: ((feedbackRes.data ?? []) as SupaFeedbackNoteRow[]).map(rowToFeedbackNote),
+    aiLogs: ((aiLogsRes.data ?? []) as SupaAiLogRow[]).map(rowToAiLog),
+    scores: ((scoresRes.data ?? []) as SupaScoreRow[]).map(rowToScore),
+    stepTransitions: ((stepRes.data ?? []) as SupaStepTransitionRow[]).map(rowToStepTransition),
+    aiInteractions: ((aiInterRes.data ?? []) as SupaAiInteractionRow[]).map(rowToAiInteraction),
+    teacherComments: ((tcommentsRes.data ?? []) as SupaTeacherCommentRow[]).map(
+      rowToTeacherComment,
+    ),
+    tombstones: [],
+  };
+  return { ok: true, db: teacherDb };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Write: upsert every entity in the TeacherDb owned by `teacherUid`.
 //
 // We do NOT delete rows that are missing from the incoming db. If a teacher

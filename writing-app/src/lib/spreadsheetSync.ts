@@ -1,7 +1,7 @@
 import { prepareDbForSheetPush } from "./attachments";
 import { getCurrentTeacherIdToken } from "./auth";
 import { callFunction } from "./netlifyClient";
-import type { Submission, TeacherDb } from "./types";
+import type { ShareLink, Submission, TeacherDb } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Storage backend feature flag.
@@ -514,6 +514,69 @@ export async function deleteRemoteEntity(
     { kind, id },
     { authToken: token, retries: 0 },
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Share-link targeted endpoints (Supabase mode).
+//
+// Replaces the old "createShareLink locally → pushDbToSheet (full DB)"
+// path. With 30 students hitting share-bootstrap at the same moment the
+// full-DB upsert was timing out at the Netlify gateway with `assignments
+// upsert: upstream connect error` / 502. Both helpers below INSERT or
+// UPDATE a single share_links row, leaving every other table untouched.
+//
+// Sheet-mode callers keep using pushDbToSheet — these helpers throw if
+// invoked outside Supabase mode rather than silently no-oping, because
+// the caller code is supposed to have already branched on isUsingSupabase.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type CreateShareRemoteResult = {
+  share: ShareLink;
+  reused: boolean;
+};
+
+export async function createShareRemote(args: {
+  assignmentId: string;
+  expiresAt: number;
+  spreadsheetId?: string;
+}): Promise<CreateShareRemoteResult> {
+  if (!USE_SUPABASE) {
+    throw new Error("createShareRemote는 Supabase 모드에서만 호출됩니다.");
+  }
+  const opts = await teacherAuthOptions();
+  const res = await callFunction<{
+    ok: true;
+    reused: boolean;
+    share: ShareLink;
+  }>(
+    "supabase-share-create",
+    {
+      assignmentId: args.assignmentId,
+      expiresAt: args.expiresAt,
+      spreadsheetId: args.spreadsheetId,
+    },
+    opts,
+  );
+  return { share: res.share, reused: res.reused };
+}
+
+export async function revokeSharesForAssignmentRemote(
+  assignmentId: string,
+): Promise<{ revokedAt: number; revokedTokens: string[] }> {
+  if (!USE_SUPABASE) {
+    throw new Error("revokeSharesForAssignmentRemote는 Supabase 모드에서만 호출됩니다.");
+  }
+  const opts = await teacherAuthOptions();
+  const res = await callFunction<{
+    ok: true;
+    revokedAt: number;
+    revokedTokens: string[];
+  }>(
+    "supabase-share-revoke",
+    { assignmentId },
+    opts,
+  );
+  return { revokedAt: res.revokedAt, revokedTokens: res.revokedTokens };
 }
 
 /**
