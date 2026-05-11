@@ -663,9 +663,12 @@ export async function readTeacherDbForUser(teacherUid: string): Promise<TeacherD
 // saturating the Supabase pool and surfacing as 502/504 from the Netlify
 // gateway. Here we touch only what the calling student is allowed to see:
 //   * the one assignment named by the token,
-//   * classes allocated to that assignment (+ their student rows),
-//   * submissions for that assignment as METADATA-ONLY rows (no body
-//     columns on the wire — see SUBMISSION_META_SELECT),
+//   * the caller's own class + that class's student rows + that class's
+//     submissions as METADATA-ONLY rows (no body columns on the wire —
+//     see SUBMISSION_META_SELECT). When the assignment is allocated to
+//     multiple classes the cross-class roster is filtered out in memory;
+//     when there are no credentials (or wrong ones) the entire roster is
+//     empty so a wrong-code probe can't distinguish itself.
 //   * the calling student's own submission body (5 columns) in a single
 //     targeted SELECT, fanned out in parallel with the children,
 //   * the calling student's own submission children (feedback / ai logs /
@@ -903,18 +906,46 @@ export async function readStudentScopedDb(params: {
     };
   }
 
-  // 5) Assemble the TeacherDb shape. All submissions land as metadata-only
-  //    (bodies = ""); the calling student's own row gets its bodies
-  //    overlaid from myBodyRes. Other students' bodies were never fetched
-  //    from Supabase so there's nothing to blank.
+  // 5) Narrow the visible roster to the caller's own class.
+  //
+  // When an assignment is allocated to multiple classes (e.g. 6 classes ×
+  // 28 students = 168 students), the previous shape returned every
+  // allocated student's metadata row on every share-bootstrap call —
+  // measured at ~84KB submissions payload even with #6's body-stripping.
+  // The student client only ever consumes their own class (write page's
+  // `db.classes.find(c => c.students.some(...))` resolves the caller's
+  // class; nothing iterates cross-class). Narrowing here:
+  //   * authenticated caller → classes/students/submissions for the
+  //     caller's own class only. Submission count drops from ~168 to ~28.
+  //   * no credentials (landing first hit) → empty roster. The landing
+  //     page only renders the assignment title and credential form at
+  //     this stage; classes/students aren't read until the second
+  //     credential-entry call returns.
+  //   * wrong credentials → empty roster. Same observable shape as
+  //     no-credentials so an attacker probing valid codes can't tell
+  //     wrong-code from no-code by inspecting roster presence.
+  //
+  // assignment / share / allocations / children stay as before — they're
+  // either single-row (assignment, share) or already scoped (allocations
+  // to this assignment, children to mySubmissionId).
+  const visibleClassRows = myClassId
+    ? classRows.filter((c) => c.id === myClassId)
+    : [];
+  const visibleStudentRows = myClassId
+    ? studentRows.filter((s) => s.class_id === myClassId)
+    : [];
+  const visibleSubmissionRows = myClassId
+    ? submissionRows.filter((s) => s.class_id === myClassId)
+    : [];
+
   const studentsByClass = new Map<string, SupaStudentRow[]>();
-  for (const s of studentRows) {
+  for (const s of visibleStudentRows) {
     const list = studentsByClass.get(s.class_id) ?? [];
     list.push(s);
     studentsByClass.set(s.class_id, list);
   }
 
-  const submissions: Submission[] = submissionRows.map(rowMetaToSubmission);
+  const submissions: Submission[] = visibleSubmissionRows.map(rowMetaToSubmission);
   if (mySubmissionId && myBodyRes.data) {
     const body = myBodyRes.data;
     const idx = submissions.findIndex((s) => s.id === mySubmissionId);
@@ -932,7 +963,7 @@ export async function readStudentScopedDb(params: {
 
   const teacherDb: TeacherDb = {
     version: 5,
-    classes: classRows.map((c) => rowToClass(c, studentsByClass.get(c.id) ?? [])),
+    classes: visibleClassRows.map((c) => rowToClass(c, studentsByClass.get(c.id) ?? [])),
     assignments: assignmentRow ? [rowToAssignment(assignmentRow)] : [],
     allocations: allocationsFromRows(allocationRows),
     shares: [rowToShareLink(share)],
