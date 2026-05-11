@@ -130,17 +130,30 @@ export async function pushDbToSheet(
   options?: { skipPullMerge?: boolean },
 ): Promise<TeacherDb> {
   /**
-   * 같은 시트를 두 교사가 공유 사용할 때, 한쪽의 push가 상대방의 변경을 통째로
+   * 시트 모드(두 교사가 같은 시트 공유)에서는 한쪽의 push가 상대방의 변경을 통째로
    * 덮어쓰지 않도록 push 직전에 시트를 pull하여 union 머지한 결과를 push한다.
    *
-   * pull 실패(네트워크 단절·시트 빈 상태) 시에는 머지 없이 로컬만 push하여
-   * 한쪽 디바이스라도 동작하도록 fail-soft.
+   * Supabase 모드에서는 이 pre-pull 머지를 생략한다 — 근거:
+   *  1) teacher_uid 파티션이라 "두 교사 공유" 케이스 자체가 없다.
+   *  2) writeTeacherDbForUser는 upsert-only이므로 stale push로 행이 사라지지 않는다
+   *     (신규 데이터 손실 0).
+   *  3) 학생 본문 5필드(outline/draft/revise/grasp/finalReportSnapshot)는 서버에서
+   *     기존 row를 read-back해 항상 supabase 값을 사용하도록 보호된다
+   *     (_supabaseDb.ts의 protectedSubmissions 블록).
+   *  4) 교사 dashboard mount 시 1회 pull이 이미 fresh state를 가져온다.
+   *  5) #2로 share create/revoke가 전용 엔드포인트로 빠져, 다중 디바이스 race가
+   *     가장 잦았던 hot path는 이 pushDbToSheet를 거치지 않는다.
    *
-   * 호출자가 이미 명시적으로 머지했다면 `skipPullMerge: true`로 중복 라운드트립
-   * 을 줄일 수 있다.
+   * 남는 위험은 단일 교사 다중 디바이스에서 같은 행의 metadata(class 이름,
+   * assignment 제목 등)를 연속 편집할 때의 row-level overwrite. 데이터 손실은
+   * 아니며 재입력으로 회복 가능. 학생 30명 동시 접속 중 매 push마다 풀-DB read
+   * 한 번씩 더 도는 비용보다 작은 trade.
+   *
+   * 호출자가 이미 명시적으로 머지했거나 풀-DB pull이 의미 없는 경로(학생
+   * partial push 등)에서는 `skipPullMerge: true`로 시트 모드에서도 우회한다.
    */
   let toPush = db as TeacherDb;
-  if (!options?.skipPullMerge) {
+  if (!options?.skipPullMerge && !USE_SUPABASE) {
     try {
       // pre-push pull도 재시도. 직전에 다른 교사가 push한 데이터가 lag로 빈
       // 결과로 보이면 우리가 그것을 union하지 못해 시트에서 사라뜨릴 수 있음.

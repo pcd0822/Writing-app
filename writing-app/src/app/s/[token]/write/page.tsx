@@ -501,13 +501,15 @@ export default function WritePage() {
    * - 화면이 다시 보이는 시점에 즉시 1회 refresh해 실시간성을 일부 회복.
    */
   useEffect(() => {
-    if (!effectiveSheetId) return;
-    setActiveSpreadsheetId(effectiveSheetId);
+    // Supabase 모드: sid가 없어도 studentAuth만 있으면 polling 가능
+    //   (share-bootstrap 경유). 시트 모드: sid 필수.
+    if (!effectiveSheetId && !(isUsingSupabase && studentAuth)) return;
+    if (effectiveSheetId) setActiveSpreadsheetId(effectiveSheetId);
     let cancelled = false;
     const tick = () => {
       if (cancelled) return;
       if (typeof document !== "undefined" && document.hidden) return;
-      void mergeStudentViewFromRemote(effectiveSheetId).then(() => {
+      void mergeStudentViewFromRemote(effectiveSheetId, studentAuth).then(() => {
         if (!cancelled) setDbBump((v) => v + 1);
       });
     };
@@ -526,7 +528,7 @@ export default function WritePage() {
         document.removeEventListener("visibilitychange", onVisible);
       }
     };
-  }, [effectiveSheetId]);
+  }, [effectiveSheetId, studentAuth]);
 
   const onResizeWidthStart = useCallback(
     (e: React.MouseEvent) => {
@@ -592,8 +594,9 @@ export default function WritePage() {
     setError(null);
     setTabSyncStage(stage);
     try {
-      if (effectiveSheetId) {
-        await mergeStudentViewFromRemote(effectiveSheetId);
+      // Supabase 모드: sid 없어도 studentAuth로 share-bootstrap 경유 가능.
+      if (effectiveSheetId || (isUsingSupabase && studentAuth)) {
+        await mergeStudentViewFromRemote(effectiveSheetId, studentAuth);
       }
       const fresh = loadTeacherDb();
       const sub = fresh.submissions.find((s) => s.id === state.submission.id);
@@ -1105,7 +1108,7 @@ export default function WritePage() {
   }
 
   async function onResolveNote(noteId: string) {
-    await mergeStudentViewFromRemote(effectiveSheetId);
+    await mergeStudentViewFromRemote(effectiveSheetId, studentAuth);
     resolveFeedbackNote(noteId, sheetSaveOpts);
     bumpDb();
   }

@@ -19,6 +19,8 @@ import {
 import { normalizeDriveAttachmentsInDb } from "./attachments";
 import {
   getActiveSpreadsheetId,
+  isUsingSupabase,
+  pullDbForShareView,
   pullDbFromSheet,
   pullDbFromSheetWithRetry,
   pushDbToSheetCoalesced,
@@ -980,10 +982,44 @@ export function mergeTeacherDbForStudentView(local: TeacherDb, remote: TeacherDb
   };
 }
 
-/** 시트에서 최신 DB를 가져와 학생 화면 기준으로 병합 후 저장 */
+/**
+ * 원격에서 최신 DB를 가져와 학생 화면 기준으로 병합 후 저장.
+ *
+ * Supabase 모드: `pullDbFromSheet`은 teacherAuthOptions()를 거쳐 교사 토큰을
+ * 요구하므로 학생 디바이스에서 호출하면 throw → 60초 polling이 silent fail로
+ * 죽어 있던 회귀가 있었다. studentAuth가 주어지면 `pullDbForShareView` 경유의
+ * share-bootstrap으로 라우팅해 학생 권한으로 본인 자식 데이터(교사 코멘트·
+ * 승인·점수 등)를 정상적으로 가져온다. studentAuth가 없으면(시크릿 모드 등
+ * sessionStorage 차단) 조용히 noop — 시트 모드 fallback도 없는 상황이므로
+ * 폴링이 중단된 상태와 같다.
+ *
+ * 시트 모드는 기존 동작 그대로(sid 필요, pullDbFromSheet 직행).
+ */
 export async function mergeStudentViewFromRemote(
   spreadsheetId?: string | null,
+  studentAuth?: {
+    shareToken: string;
+    studentNo: string;
+    studentCode: string;
+  } | null,
 ): Promise<void> {
+  if (isUsingSupabase) {
+    if (!studentAuth) return;
+    try {
+      const remote = (await pullDbForShareView({
+        shareToken: studentAuth.shareToken,
+        spreadsheetId: null,
+        studentNo: studentAuth.studentNo,
+        studentCode: studentAuth.studentCode,
+      })) as TeacherDb | null;
+      if (!remote) return;
+      const merged = mergeTeacherDbForStudentView(loadTeacherDb(), remote);
+      saveTeacherDb(merged, { skipRemotePush: true });
+    } catch {
+      /* 네트워크 실패 시 로컬 유지 */
+    }
+    return;
+  }
   const sid = spreadsheetId?.trim() || getActiveSpreadsheetId();
   if (!sid) return;
   try {
