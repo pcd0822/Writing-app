@@ -811,7 +811,8 @@ export async function readStudentScopedDb(params: {
   const submissionsP = db
     .from("submissions")
     .select(SUBMISSION_META_SELECT)
-    .eq("assignment_id", assignmentId);
+    .eq("assignment_id", assignmentId)
+    .returns<SupaSubmissionMetaRow[]>();
 
   const [classesRes, studentsRes, submissionsRes] = await Promise.all([
     classesP,
@@ -881,6 +882,7 @@ export async function readStudentScopedDb(params: {
         .select("id, outline_text, draft_text, revise_text, final_report_snapshot, grasp_data")
         .eq("id", mySubmissionId)
         .maybeSingle()
+        .returns<SupaSubmissionBodyRow>()
     : Promise.resolve({ data: null, error: null });
   const [childResults, myBodyRes] = await Promise.all([childPromises, myBodyP]);
   const [feedbackRes, aiLogsRes, scoresRes, stepRes, aiInterRes, tcommentsRes] = childResults;
@@ -914,7 +916,7 @@ export async function readStudentScopedDb(params: {
 
   const submissions: Submission[] = submissionRows.map(rowMetaToSubmission);
   if (mySubmissionId && myBodyRes.data) {
-    const body = myBodyRes.data as SupaSubmissionBodyRow;
+    const body = myBodyRes.data;
     const idx = submissions.findIndex((s) => s.id === mySubmissionId);
     if (idx >= 0) {
       submissions[idx] = {
