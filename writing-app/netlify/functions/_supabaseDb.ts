@@ -1170,46 +1170,89 @@ export async function writeTeacherDbForUser(
     (s) => knownAssignmentIds.has(s.assignmentId) && knownClassIds.has(s.classId),
   );
   if (candidateSubmissions.length > 0) {
+    // ── 학생 본문 race 차단 (2026-05-11 incident) ───────────────────────
+    //
+    // 이전 정책은 "교사 push 시 supabase 현재 body를 read-back 해 incoming
+    // body를 폐기" 였다. 그러나 read-back-then-upsert는 원자적이지 않아 학생
+    // partial UPDATE가 SELECT 직후 ~ UPSERT 직전에 commit되면 그 학생의
+    // 최신 본문이 옛 값으로 다시 덮였다. 교사가 다른 학생을 승인하는 순간
+    // 마침 저장 누른 학생의 글이 사라지는 사고로 발현.
+    //
+    // 구조적 해결: 교사 path는 학생-소유 컬럼을 UPDATE에 **포함시키지 않는다**.
+    // Postgres UPDATE는 SET에 적힌 컬럼만 건드리므로, body 컬럼이 payload에
+    // 없으면 어떤 동시 학생 write도 그대로 살아남는다. read-then-write 자체를
+    // 제거 → race window 0.
+    //
+    // 학생-소유(절대 미터치) 컬럼:
+    //   outline_text, draft_text, revise_text, grasp_data, final_report_snapshot,
+    //   outline_submitted_at, draft_submitted_at, revise_submitted_at,
+    //   current_step, updated_at
+    //   ※ updated_at은 학생 partial 경로(upsertStudentSubmission)에서만 갱신.
+    //     교사 메타데이터 변경은 supabase의 updated_at을 건드리지 않는다 —
+    //     mount-once 동기화의 timestamp 비교가 학생 write를 기준으로 진행되게.
+    //
+    // 교사-소유 컬럼(UPDATE 대상):
+    //   outline_approved_at, draft_approved_at, revise_approved_at,
+    //   final_approved_at, final_report_published_at, final_report_snapshot,
+    //   outline_reject_reason, draft_reject_reason, revise_reject_reason
+    //
+    // brand-new row(supabase에 아직 없는 id)는 INSERT로 처리 — 이 경우는 거의
+    // 일어나지 않지만(학생 partial이 supabase에 row를 먼저 만든다), 안전을 위해
+    // 풀-필드 INSERT 유지.
+
     const candidateIds = candidateSubmissions.map((s) => s.id);
     const { data: existingRows, error: existingErr } = await getSupabaseAdmin()
       .from("submissions")
-      .select(
-        "id,outline_text,draft_text,revise_text,grasp_data,final_report_snapshot",
-      )
+      .select("id")
       .in("id", candidateIds);
     if (existingErr) throw new Error(`submissions read-back: ${existingErr.message}`);
-    const existingById = new Map(
-      ((existingRows ?? []) as Array<{
-        id: string;
-        outline_text: string;
-        draft_text: string;
-        revise_text: string;
-        grasp_data: string;
-        final_report_snapshot: string;
-      }>).map((r) => [r.id, r]),
+    const existingIds = new Set(
+      ((existingRows ?? []) as Array<{ id: string }>).map((r) => r.id),
     );
 
-    const protectedSubmissions: Submission[] = candidateSubmissions.map((s) => {
-      const prior = existingById.get(s.id);
-      if (!prior) return s; // brand-new row, nothing to protect
-      // 학생만 변경하는 5개 본문 필드(outline/draft/revise/grasp/finalReport).
-      // 교사 fullDB push는 이 필드를 *절대* 자기 캐시 값으로 덮어쓰지 않고,
-      // 무조건 supabase의 현재값을 사용한다. 이전 정책("incoming이 빈
-      // string일 때만 supabase 값으로 보존")은 교사 캐시가 stale인 채 push
-      // 되면(예: 학생이 220자 저장 → 교사 캐시는 200자) 학생의 최신 글을
-      // 회귀시킬 수 있다는 race가 남아 있었다. 이 path는 학생의 최신 본문을
-      // 100% 보호하기 위해 incoming 측 본문은 폐기.
-      return {
-        ...s,
-        outlineText: prior.outline_text ?? "",
-        draftText: prior.draft_text ?? "",
-        reviseText: prior.revise_text ?? "",
-        graspData: prior.grasp_data ?? "",
-        finalReportSnapshot: prior.final_report_snapshot ?? "",
-      };
-    });
+    const newRows = candidateSubmissions.filter((s) => !existingIds.has(s.id));
+    const updateRows = candidateSubmissions.filter((s) => existingIds.has(s.id));
 
-    await upsertChunked("submissions", protectedSubmissions.map(submissionToRow), "id");
+    // 1) brand-new row → 풀-필드 INSERT (race 무관: 새 행은 동시 학생 write가
+    //    있을 수 없다. 학생 partial이 먼저였다면 id가 이미 supabase에 있어 updateRows 행).
+    if (newRows.length > 0) {
+      await upsertChunked("submissions", newRows.map(submissionToRow), "id");
+    }
+
+    // 2) 기존 row → 교사-소유 컬럼만 UPDATE. 본문/제출시각/단계/updated_at은 미터치.
+    if (updateRows.length > 0) {
+      const db = getSupabaseAdmin();
+      const TEACHER_UPDATE_PARALLELISM = 8;
+      for (let i = 0; i < updateRows.length; i += TEACHER_UPDATE_PARALLELISM) {
+        const chunk = updateRows.slice(i, i + TEACHER_UPDATE_PARALLELISM);
+        await Promise.all(
+          chunk.map(async (s) => {
+            const teacherFields: Record<string, unknown> = {
+              outline_approved_at: s.outlineApprovedAt ?? null,
+              draft_approved_at: s.draftApprovedAt ?? null,
+              revise_approved_at: s.reviseApprovedAt ?? null,
+              final_approved_at: s.finalApprovedAt ?? null,
+              final_report_published_at: s.finalReportPublishedAt ?? null,
+              outline_reject_reason: s.outlineRejectReason ?? "",
+              draft_reject_reason: s.draftRejectReason ?? "",
+              revise_reject_reason: s.reviseRejectReason ?? "",
+            };
+            // final_report_snapshot은 교사가 명시적으로 발행할 때만 set. 다른 교사
+            // 디바이스의 stale cache(빈 snapshot)가 발행된 snapshot을 덮지 않도록
+            // incoming이 비어있으면 컬럼 자체를 UPDATE에서 뺀다 — Postgres는 SET에
+            // 없는 컬럼은 미터치이므로 supabase 현재값 유지.
+            if (s.finalReportSnapshot && s.finalReportSnapshot.length > 0) {
+              teacherFields.final_report_snapshot = s.finalReportSnapshot;
+            }
+            const { error } = await db
+              .from("submissions")
+              .update(teacherFields)
+              .eq("id", s.id);
+            if (error) throw new Error(`submissions teacher-update: ${error.message}`);
+          }),
+        );
+      }
+    }
   }
 
   // children FK 검증용 — protect block에서 실제로 upsert가 일어났는지와 무관하게
