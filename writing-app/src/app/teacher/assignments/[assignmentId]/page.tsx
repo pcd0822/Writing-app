@@ -108,12 +108,27 @@ export default function TeacherAssignmentPage() {
   // 그대로 localStorage에 덮어 학생 partial push의 최신 상태를 즉시 반영한다.
   // mergeTeacherDbs를 쓰지 않는 이유는 teacher/page.tsx의 mount-once useEffect
   // 주석 참조 — local의 stale 빈 submission이 supabase의 글을 덮는 사고 차단.
+  //
+  // pull 직전에 flushPendingPush로 코얼레싱 큐(800ms 디바운스)에 대기 중이거나
+  // inflight인 교사 push를 먼저 supabase에 강제 반영한다. 그렇지 않으면 교사가
+  // 메모/코멘트를 저장한 직후 push가 supabase에 도달하기 전에 폴링이 stale 상태로
+  // localStorage를 덮어, 화면에서 방금 단 메모가 보였다 사라졌다 반복되는 race가
+  // 발생한다.
   useEffect(() => {
     let cancelled = false;
     async function pullAndBump() {
       if (cancelled) return;
       if (isUsingSupabase) {
         try {
+          const sid = getActiveSpreadsheetId();
+          if (sid) {
+            try {
+              await flushPendingPush(sid);
+            } catch (e) {
+              console.warn("[Writing app] flushPendingPush before poll failed:", e);
+            }
+          }
+          if (cancelled) return;
           const r = await pullDbFromSheetWithRetry("", { attempts: 1 });
           if (cancelled) return;
           if (r.db) {
