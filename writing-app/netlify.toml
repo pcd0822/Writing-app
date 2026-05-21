@@ -13,6 +13,12 @@
   # 키 6개만 명시적으로 제외해, Gemini API key·Supabase service role·Google
   # service account 같은 진짜 서버 시크릿은 그대로 스캔 보호 대상에 남긴다.
   SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,NEXT_PUBLIC_FIREBASE_APP_ID"
+  # Smart Detection은 환경변수와 무관하게 AIza… 같은 알려진 API key 패턴을
+  # 빌드 출력에서 직접 검출한다. 위 SECRETS_SCAN_OMIT_KEYS는 키 이름 기반
+  # 제외라 패턴 기반 Smart Detection엔 적용되지 않는다. Firebase 웹 키는
+  # 공개 안전한 키이므로 Smart Detection을 비활성화한다 — 명시적 secret
+  # scanning(서버 환경변수 값이 클라이언트 번들에 새는지 검사)은 그대로 동작.
+  SECRETS_SCAN_SMART_DETECTION_ENABLED = "false"
 
 [functions]
   directory = "netlify/functions"
