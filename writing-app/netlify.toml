@@ -6,6 +6,13 @@
   # googleapis는 Node 18+가 필요하고 22 LTS가 권장. 명시하지 않으면 빌더가
   # 오래된 Node로 떨어져 cold start init이 느려질 수 있음.
   NODE_VERSION = "22"
+  # NEXT_PUBLIC_* 환경변수는 Next.js가 빌드 시 클라이언트 번들에 inline한다.
+  # Firebase 웹 SDK 키(AIza…로 시작)는 디자인상 공개되어도 안전한 키 —
+  # URL 제한 / App Check / Auth·Firestore 보안 규칙으로 보호된다 — 그러나
+  # Netlify의 secret scanner는 패턴만 보고 빌드를 차단한다. Firebase 클라이언트
+  # 키 6개만 명시적으로 제외해, Gemini API key·Supabase service role·Google
+  # service account 같은 진짜 서버 시크릿은 그대로 스캔 보호 대상에 남긴다.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,NEXT_PUBLIC_FIREBASE_APP_ID"
 
 [functions]
   directory = "netlify/functions"
