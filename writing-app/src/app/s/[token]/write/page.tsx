@@ -321,7 +321,31 @@ export default function WritePage() {
     return () => {
       cancelled = true;
     };
-  }, [token, studentNo, dbBump]);
+  }, [token, studentNo]);
+
+  // dbBump 변경(저장·제출·탭 전환 등 local write 직후) 시 화면 갱신을 위해 mount
+  // useEffect를 다시 돌리면 share-bootstrap이 그때마다 한 번씩 더 호출돼, 학생 30명이
+  // 동시에 단계 전환·저장하는 수업 시간대에 같은 함수에 100+ 호출이 몰리고 504/502가
+  // 났다. dbBump 효과는 share-bootstrap 없이 localStorage에서 학생 본인 submission만
+  // 다시 읽어 status pill 등 즉시 반영이 필요한 부분만 갱신하고, 다른 학생들 메타데이터·
+  // 교사 코멘트·점수 등은 polling이 갱신하도록 분리한다. mount(=share-bootstrap 호출)은
+  // 정말 token/studentNo가 바뀔 때만 일어난다.
+  useEffect(() => {
+    if (dbBump === 0) return;
+    setState((prev) => {
+      if (!prev.ok) return prev;
+      const db = loadTeacherDb();
+      const localMine = db.submissions.find(
+        (s) =>
+          s.assignmentId === prev.assignment.id &&
+          s.classId === prev.cls.id &&
+          s.studentNo === studentNo,
+      );
+      if (!localMine) return prev;
+      const submission = localMine;
+      return { ...prev, submission };
+    });
+  }, [dbBump, studentNo]);
 
   const effectiveSheetId =
     sid.trim() ||
@@ -506,17 +530,27 @@ export default function WritePage() {
     if (!effectiveSheetId && !(isUsingSupabase && studentAuth)) return;
     if (effectiveSheetId) setActiveSpreadsheetId(effectiveSheetId);
     let cancelled = false;
-    const tick = () => {
+    // visibilitychange로 화면이 복귀할 때 즉시 한 번 더 fetch하는 동작이, 학생이
+    // 탭을 잠깐씩 자주 전환하는 수업 환경에서 share-bootstrap을 짧은 간격으로 연속
+    // 호출시켜 30명 분이 동시에 몰리면 함수 quota·DB connection 폭주의 원인이 됐다.
+    // 마지막 실제 호출 시각을 기록해 30초 이내 재호출은 skip — 60초 interval은
+    // 그대로 유지되므로 실시간성 손실은 최대 30초.
+    const lastTickAtRef = { current: 0 };
+    const TICK_THROTTLE_MS = 30_000;
+    const tick = (reason: "interval" | "visible") => {
       if (cancelled) return;
       if (typeof document !== "undefined" && document.hidden) return;
+      const now = Date.now();
+      if (reason === "visible" && now - lastTickAtRef.current < TICK_THROTTLE_MS) return;
+      lastTickAtRef.current = now;
       void mergeStudentViewFromRemote(effectiveSheetId, studentAuth).then(() => {
         if (!cancelled) setDbBump((v) => v + 1);
       });
     };
-    tick();
-    const id = window.setInterval(tick, 60000);
+    tick("interval");
+    const id = window.setInterval(() => tick("interval"), 60000);
     const onVisible = () => {
-      if (typeof document !== "undefined" && !document.hidden) tick();
+      if (typeof document !== "undefined" && !document.hidden) tick("visible");
     };
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisible);

@@ -449,19 +449,49 @@ export type ShareViewPullArgs = {
   studentCode?: string;
 };
 
+// share-bootstrap 응답 짧은 메모리 캐시. 학생 디바이스에서 거의 같은 시점에 여러
+// 경로(mount useEffect / polling tick / attemptOpenLockedTab / share landing → write
+// redirect)가 동시 또는 연쇄적으로 share-bootstrap을 부르는 경우, 같은 응답을 5초
+// 동안 재사용해 함수 호출 자체를 줄인다. in-flight 공유로 동시 호출도 1회로 dedupe.
+// TTL을 짧게 둔 이유: 학생이 자기 본문을 저장한 직후 다시 fetch가 필요한 흐름은
+// 60초 polling 주기 안에서 알아서 들어오고, 폴링 직전 캐시는 거의 만료된다.
+const shareBootstrapCache = new Map<string, { at: number; value: unknown | null }>();
+const shareBootstrapInflight = new Map<string, Promise<unknown | null>>();
+const SHARE_BOOTSTRAP_TTL_MS = 5_000;
+
+function shareBootstrapKey(args: ShareViewPullArgs): string {
+  return `${args.shareToken}|${args.studentNo ?? ""}|${args.studentCode ?? ""}`;
+}
+
 export async function pullDbForShareView(
   args: ShareViewPullArgs,
 ): Promise<unknown | null> {
   if (USE_SUPABASE) {
-    const res = await callFunction<{ db: unknown | null }>(
-      "supabase-share-bootstrap",
-      {
-        shareToken: args.shareToken,
-        studentNo: args.studentNo,
-        studentCode: args.studentCode,
-      },
-    );
-    return res.db;
+    const key = shareBootstrapKey(args);
+    const cached = shareBootstrapCache.get(key);
+    if (cached && Date.now() - cached.at < SHARE_BOOTSTRAP_TTL_MS) {
+      return cached.value;
+    }
+    const inflight = shareBootstrapInflight.get(key);
+    if (inflight) return inflight;
+    const p = (async () => {
+      try {
+        const res = await callFunction<{ db: unknown | null }>(
+          "supabase-share-bootstrap",
+          {
+            shareToken: args.shareToken,
+            studentNo: args.studentNo,
+            studentCode: args.studentCode,
+          },
+        );
+        shareBootstrapCache.set(key, { at: Date.now(), value: res.db });
+        return res.db;
+      } finally {
+        shareBootstrapInflight.delete(key);
+      }
+    })();
+    shareBootstrapInflight.set(key, p);
+    return p;
   }
   if (!args.spreadsheetId) return null;
   const res = await callFunction<PullResult>("db-get", {
